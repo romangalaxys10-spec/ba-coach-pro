@@ -80,7 +80,7 @@ async function loadFile(name: FileName, force = false): Promise<Partial<FileData
   return job;
 }
 
-async function saveFile(name: FileName, rows: Row[], message: string, attempt = 0): Promise<void> {
+async function saveFile(name: FileName, rows: Row[], message: string): Promise<void> {
   const res = await fetch(`${API}/repos/${OWNER}/${REPO}/contents/db/${name}.json`, {
     method: 'PUT',
     headers: ghHeaders(),
@@ -92,16 +92,8 @@ async function saveFile(name: FileName, rows: Row[], message: string, attempt = 
     cache: 'no-store',
   });
   if (res.status === 409 || res.status === 422) {
-    // sha conflict — someone wrote concurrently; re-read and re-apply
-    if (attempt < 4) {
-      await loadFile(name, true);
-      const fresh = cache.data[name] ?? [];
-      // caller re-applies its mutation onto fresh rows via the retry callback
-      if (pendingRetry[name]) {
-        rows = pendingRetry[name]!(fresh);
-        return saveFile(name, rows, message, attempt + 1);
-      }
-    }
+    // stale sha (GitHub's contents API serves briefly cached metadata) —
+    // mutate() re-loads fresh rows and re-applies the mutation with backoff
     throw new Error(`ghdb conflict on ${name}`);
   }
   if (!res.ok) throw new Error(`ghdb save ${name}: ${res.status}`);
@@ -111,20 +103,23 @@ async function saveFile(name: FileName, rows: Row[], message: string, attempt = 
   cache.fetchedAt = Date.now();
 }
 
-// per-file retry applicators (set by mutate, consumed by saveFile on conflict)
-const pendingRetry: Partial<Record<FileName, ((fresh: Row[]) => Row[])>> = {};
-
+/**
+ * Load fresh rows, apply the mutation, save. On a sha conflict (concurrent
+ * writer or GitHub metadata cache lag) re-load and re-apply with backoff —
+ * the callback always runs against the freshest rows, so retries converge.
+ */
 async function mutate(name: FileName, fn: (rows: Row[]) => Row[] | Promise<Row[]>, message: string): Promise<void> {
-  const fresh = (await loadFile(name, true))[name] ?? [];
-  const next = await fn([...fresh]);
-  pendingRetry[name] = base => {
-    // re-apply strategy: recompute from the ORIGINAL fresh rows we loaded
-    return next;
-  };
-  try {
-    await saveFile(name, next, message);
-  } finally {
-    delete pendingRetry[name];
+  for (let attempt = 0; ; attempt++) {
+    const fresh = (await loadFile(name, true))[name] ?? [];
+    const next = await fn([...fresh]);
+    try {
+      await saveFile(name, next, message);
+      return;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/conflict on /.test(msg) || attempt >= 5) throw e;
+      await sleep(350 + 250 * attempt + Math.floor(Math.random() * 250));
+    }
   }
 }
 
