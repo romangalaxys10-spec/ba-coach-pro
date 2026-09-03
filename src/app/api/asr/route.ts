@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { callASR } from '@/lib/ai';
 
 export const maxDuration = 300;
 
@@ -8,10 +9,7 @@ export async function POST(req: NextRequest) {
     if (!audio) {
       return NextResponse.json({ error: 'audio (base64) is required' }, { status: 400 });
     }
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    const zai = await ZAI.create();
-    const response = await zai.audio.asr.create({ file_base64: audio });
-    const text = response.text || '';
+    const text = await callASR(audio);
     return NextResponse.json({ text });
   } catch (error) {
     console.error('[/api/asr] error:', error);

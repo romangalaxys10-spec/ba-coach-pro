@@ -117,6 +117,46 @@ your-private-repo/
 
 ---
 
+## 🛰️ The AI Tunnel — free GLM-5 on any host
+
+**The problem.** Z.ai's internal GLM-5 models (chat, TTS, ASR) live behind an internal endpoint that only a Z.ai sandbox instance can reach. A public Vercel deployment has no API key and no route to that endpoint — so out of the box its AI features would be dark.
+
+**The solution — a proxy tunnel, the same way space-z.ai works.** Every model call in BA Coach Pro flows through one gateway (`src/lib/ai.ts`) with a three-step resolution chain:
+
+```
+1. AI_TUNNEL_URL  →  forward the call to a host that CAN reach the models
+2. ZAI_API_KEY    →  direct OpenAI-compatible API (api.z.ai)
+3. z-ai-web-dev-sdk  →  local sandbox resolution (default inside Z.ai)
+```
+
+Set `AI_TUNNEL_URL` on your hosting platform to point at any running Z.ai sandbox instance of this app — its `/api/tunnel` endpoint executes chat, TTS and ASR locally with the internal GLM-5 models and returns the results:
+
+```
+Browser → Vercel (no key, no SDK) ──AI_TUNNEL_URL──▶ Z.ai sandbox preview
+                                                    └─ /api/tunnel → GLM-5 chat · TTS · ASR
+```
+
+**Setup (2 minutes):**
+
+1. Open this repo in a Z.ai sandbox (or use your existing space-z.ai instance) and keep it running — that instance becomes the tunnel exit node.
+2. On Vercel (or any host), add one environment variable:
+
+   ```bash
+   AI_TUNNEL_URL=https://preview-<your-instance-id>.space-z.ai
+   # optional shared secret — set TUNNEL_KEY on the sandbox and the same value here:
+   AI_TUNNEL_KEY=<secret>
+   ```
+
+3. Redeploy. Chat, quiz, flashcards, interview simulator and voice mode all go live — with zero API cost.
+
+**Notes.**
+
+- `GET /api/tunnel` returns a health JSON — handy for verifying the tunnel endpoint before wiring it up.
+- The sandbox must stay running; it is the thing actually talking to the models. For production installs prefer `ZAI_API_KEY` (direct, no dependency on a sandbox).
+- Set `TUNNEL_KEY` on the sandbox instance (and `AI_TUNNEL_KEY` on the client) to require a shared secret on every tunnel call.
+
+---
+
 ## 🏛️ The Harvard-Inspired Learning Experience
 
 The UX borrows deliberately from elite university course portals — the parts that make learners feel they've joined something serious:
@@ -143,7 +183,7 @@ bun run dev            # → http://localhost:3000
 
 Open `http://localhost:3000`, enter your name, **save your secret token**, and you're enrolled.
 
-> **Deploying?** Any Node host works (Vercel, Railway, Fly, a $5 VPS). Set `DATABASE_URL` — and for a demo deployment, note SQLite lives on the host filesystem; pair students with GitHub for durable cross-deployment memory.
+> **Deploying?** Any Node host works (Vercel, Railway, Fly, a $5 VPS). Set `DATABASE_URL` — and for a demo deployment, note SQLite lives on the host filesystem; pair students with GitHub for durable cross-deployment memory. To light up the AI features with no API key, point `AI_TUNNEL_URL` at a running Z.ai sandbox instance (see **🛰️ The AI Tunnel**).
 
 ---
 
@@ -216,7 +256,10 @@ curl -X POST http://localhost:3000/api/github -H "x-student-token: $TOKEN" \
 | GET/POST | `/api/progress` | lesson completion toggles | ✅ |
 | POST | `/api/tts` | text-to-speech (mp3, chunked) | ✅ |
 | POST | `/api/asr` | speech-to-text (WAV base64) | ✅ |
+| GET/POST | `/api/tunnel` | AI tunnel exit node: health / `llm` · `tts` · `asr` proxy calls | 🔑* |
 | POST | `/api/github` | `pair` / `sync` / `restore` / `unpair` / `autosync` | ✅ |
+
+\* `/api/tunnel` requires a key only when `TUNNEL_KEY` is set on the instance; otherwise it is open, like the rest of the public demo.
 
 ---
 
@@ -234,6 +277,7 @@ ba-coach-pro/
 │   │       ├── quiz/ flashcards/    #   LLM generators + attempt/stat storage
 │   │       ├── progress/            #   lesson completion
 │   │       ├── github/              #   pair / sync / restore / unpair / autosync
+│   │       ├── tunnel/              #   AI tunnel exit node (llm / tts / asr proxy)
 │   │       └── tts/ asr/            #   voice pipeline
 │   ├── components/                  # auth-gate, chat-view, skills-library,
 │   │                                # learn-view, practice-view, templates-view,
