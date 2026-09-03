@@ -26,6 +26,8 @@ export interface ProviderPreset {
   needsKey: boolean;
   freeTier?: boolean;
   note?: string;
+  /** provider exposes a model list → settings shows the auto "fastest models" panel */
+  fastModels?: boolean;
 }
 
 export const AI_PROVIDER_PRESETS: ProviderPreset[] = [
@@ -51,16 +53,20 @@ export const AI_PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://integrate.api.nvidia.com/v1',
     models: [
       'deepseek-ai/deepseek-v4-flash-0731',
+      'openai/gpt-oss-20b',
+      'nvidia/nemotron-3.5-lightning-30b-a3b',
+      'nvidia/nemotron-nano-3-30b-a3b',
+      'google/gemma-3-4b-it',
+      'nv-mistralai/mistral-nemo-12b-instruct',
       'moonshotai/kimi-k3',
       'nvidia/nemotron-3-ultra-550b-a55b',
-      'deepseek-ai/deepseek-v4-pro-0813',
-      'openai/gpt-oss-20b',
     ],
     defaultModel: 'deepseek-ai/deepseek-v4-flash-0731',
     keyHint: 'Paste your nvapi-… key',
     needsKey: true,
     freeTier: true,
-    note: 'Free API credits from build.nvidia.com. Keys start with nvapi-.',
+    fastModels: true,
+    note: 'Free API credits from build.nvidia.com. Keys start with nvapi-. All models are auto-fetched and ranked by speed — the fastest 10 are suggested, and "Measure real speed" benchmarks them live with your key.',
   },
   {
     id: 'opencode-zen',

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import { apiFetch, readJson } from '@/lib/client-api';
 import { AI_PROVIDER_PRESETS, getPreset } from '@/lib/ai-providers';
+import type { FastestResult } from '@/lib/model-speed';
 import { BA_LEVELS, computeCareerProgress, levelById } from '@/lib/levels';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,6 +42,7 @@ import {
   GraduationCap,
   Bot,
   Plug,
+  Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -451,6 +453,12 @@ function AiProviderSection() {
   const [result, setResult] = useState<TestResult | null>(null);
   const [aiMsg, setAiMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
+  // fastest-models panel state (NVIDIA-style providers with a live model list)
+  const [fast, setFast] = useState<FastestResult | null>(null);
+  const [fastLoading, setFastLoading] = useState(false);
+  const [fastMsg, setFastMsg] = useState<string | null>(null);
+  const modelTouched = useRef(false);
+
   // keep the picker in sync with what's actually saved
   useEffect(() => {
     if (saved?.providerId) setSelected(saved.providerId);
@@ -460,6 +468,7 @@ function AiProviderSection() {
     setSelected(id);
     setAiMsg(null);
     setResult(null);
+    modelTouched.current = false;
     const preset = getPreset(id);
     if (preset) {
       // prefill from the preset unless the saved config IS this preset
@@ -480,6 +489,56 @@ function AiProviderSection() {
 
   const preset = getPreset(selected);
   const editingSaved = Boolean(saved && selected === saved.providerId);
+
+  /* ---------- fastest models (auto-fetch + live benchmark) ---------- */
+
+  const fetchFastest = async (opts?: { refresh?: boolean; withKey?: boolean }) => {
+    if (!preset?.fastModels) return;
+    setFastLoading(true);
+    setFastMsg(null);
+    try {
+      const res = await apiFetch('/api/ai-provider/fastest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          providerId: selected,
+          baseUrl: baseUrl.trim() || undefined,
+          // key only travels when the student explicitly measures; otherwise
+          // the server falls back to the stored key, else estimate-only mode
+          apiKey: opts?.withKey ? apiKey.trim() || undefined : undefined,
+          refresh: opts?.refresh,
+        }),
+      });
+      const data = await readJson<FastestResult>(res);
+      setFast(data);
+      if (!data.ok) {
+        setFastMsg(data.message || 'Could not fetch the provider model list.');
+      } else if (data.estimated) {
+        setFastMsg(data.message || null);
+        // auto-suggest the fastest known model while the field is untouched
+        if (data.suggested && !modelTouched.current) setModel(data.suggested);
+      } else {
+        setFastMsg(data.message || null);
+        if (data.suggested && (!modelTouched.current || model === preset.defaultModel)) {
+          setModel(data.suggested);
+        }
+      }
+    } catch (e) {
+      setFastMsg(e instanceof Error ? e.message : 'Fastest-models fetch failed.');
+    } finally {
+      setFastLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (preset?.fastModels) {
+      void fetchFastest();
+    } else {
+      setFast(null);
+      setFastMsg(null);
+    }
+    // re-run when the picked preset changes
+  }, [selected]);
 
   const saveAndTest = async () => {
     setAiMsg(null);
@@ -632,17 +691,121 @@ function AiProviderSection() {
                 list="ai-model-options"
                 placeholder="e.g. glm-4.7"
                 value={model}
-                onChange={e => setModel(e.target.value)}
+                onChange={e => {
+                  modelTouched.current = true;
+                  setModel(e.target.value);
+                }}
                 className="font-mono text-xs"
               />
               <datalist id="ai-model-options">
-                {preset.models.map(m => <option key={m} value={m} />)}
+                {(fast?.results.map(r => r.model) ?? [])
+                  .concat(preset.models)
+                  .filter((v, i, a) => a.indexOf(v) === i)
+                  .map(m => <option key={m} value={m} />)}
               </datalist>
               <p className="text-[11px] text-muted-foreground">
-                {preset.models.length ? `Suggested: ${preset.models.slice(0, 3).join(', ')}` : 'Type any model id your provider supports.'}
+                {preset.fastModels
+                  ? 'Ranked fastest-first below — click one to use it, or type any model id.'
+                  : preset.models.length
+                    ? `Suggested: ${preset.models.slice(0, 3).join(', ')}`
+                    : 'Type any model id your provider supports.'}
               </p>
             </div>
           </div>
+
+          {preset.fastModels && (
+            <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <Zap className="h-3.5 w-3.5 text-amber-500" />
+                  Fastest models right now
+                  {fast?.results.length ? (
+                    <span className="font-normal text-muted-foreground">
+                      · {fast.estimated ? 'estimated' : 'measured live'} · {fast.totalModels} models fetched
+                      {fast.benchmarked ? `, ${fast.benchmarked} benchmarked` : ''}
+                      {fast.cached ? ' · cached' : ''}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => void fetchFastest({ refresh: true })}
+                    disabled={fastLoading}
+                  >
+                    {fastLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />}
+                    Refresh
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => void fetchFastest({ refresh: true, withKey: true })}
+                    disabled={fastLoading}
+                  >
+                    <Zap className="h-3 w-3" />
+                    Measure real speed
+                  </Button>
+                </div>
+              </div>
+
+              {fastMsg && <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{fastMsg}</p>}
+
+              {fastLoading && !fast?.results.length && (
+                <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Fetching the live model list…
+                </p>
+              )}
+
+              {fast?.results.length ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {fast.results.map((r, i) => (
+                    <button
+                      key={r.model}
+                      type="button"
+                      onClick={() => {
+                        modelTouched.current = true;
+                        setModel(r.model);
+                      }}
+                      className={cn(
+                        'rounded-lg border px-2 py-1 text-left text-[11px] transition-colors',
+                        model === r.model
+                          ? 'border-amber-500/60 bg-amber-500/15'
+                          : 'border-border/60 bg-card hover:border-amber-500/40'
+                      )}
+                    >
+                      <span className="flex items-center gap-1 font-mono font-medium">
+                        {i === 0 && <Zap className="h-3 w-3 shrink-0 text-amber-500" />}
+                        {r.model}
+                      </span>
+                      <span className="block text-[10px] text-muted-foreground">
+                        {r.estimated
+                          ? r.note || 'estimated'
+                          : `${r.tokPerSec} tok/s · ${((r.latencyMs || 0) / 1000).toFixed(1)}s`}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {fast?.errors?.length ? (
+                <details className="mt-2 text-[11px] text-muted-foreground">
+                  <summary className="cursor-pointer">
+                    {fast.errors.length} model{fast.errors.length > 1 ? 's' : ''} could not be benchmarked
+                  </summary>
+                  <ul className="mt-1 space-y-0.5 pl-3">
+                    {fast.errors.map(e => (
+                      <li key={e.model} className="font-mono">{e.model} — {e.error}</li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <label htmlFor="ai-key" className="text-xs font-medium text-muted-foreground">API key</label>
