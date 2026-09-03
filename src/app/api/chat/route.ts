@@ -4,6 +4,7 @@ import { buildCoachPrompt, buildInterviewerScenario, type ChatMode } from '@/lib
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
 import { callLLM } from '@/lib/ai';
+import { studentAIOverride } from '@/lib/ai-providers';
 
 export const maxDuration = 300;
 
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
       ...history.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content })),
     ];
 
-    const reply = await callLLM(llmMessages);
+    const reply = await callLLM(llmMessages, 2, studentAIOverride(student));
 
     await db.message.create({
       data: { conversationId: conversation.id, role: 'assistant', content: reply },

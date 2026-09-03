@@ -4,6 +4,7 @@ import { getSkill, BA_SKILLS } from '@/data/skills-data';
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
 import { callLLM } from '@/lib/ai';
+import { studentAIOverride } from '@/lib/ai-providers';
 
 export const maxDuration = 300;
 
@@ -28,6 +29,9 @@ function extractJson(raw: string): unknown {
 
 export async function POST(req: NextRequest) {
   try {
+    const student = await getAuthedStudent(req);
+    if (!student) return unauthorized();
+
     const { skillSlug, category, difficulty = 'mixed', count = 5 } = await req.json();
     const n = Math.min(10, Math.max(3, Number(count) || 5));
 
@@ -83,10 +87,14 @@ Rules:
 - questions must be answerable from the technique knowledge provided, scenario-grounded where possible
 - no "all of the above" options`;
 
-    const raw = await callLLM([
-      { role: 'assistant', content: system },
-      { role: 'user', content: `Generate the quiz now (${n} questions, difficulty: ${difficulty}).` },
-    ]);
+    const raw = await callLLM(
+      [
+        { role: 'assistant', content: system },
+        { role: 'user', content: `Generate the quiz now (${n} questions, difficulty: ${difficulty}).` },
+      ],
+      2,
+      studentAIOverride(student)
+    );
 
     const parsed = extractJson(raw) as { questions?: QuizQuestion[] } | QuizQuestion[];
     const questions = Array.isArray(parsed) ? parsed : parsed.questions || [];

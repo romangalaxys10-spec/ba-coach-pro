@@ -25,6 +25,15 @@ export interface PendingScenario {
   difficulty?: string;
 }
 
+export interface AiProviderInfo {
+  configured: boolean;
+  providerId: string | null;
+  baseUrl: string | null;
+  model: string | null;
+  keyMasked: string | null;
+  verifiedAt: string | null;
+}
+
 export interface StudentInfo {
   id: string;
   name: string;
@@ -37,6 +46,7 @@ export interface StudentInfo {
     lastSyncAt?: string | null;
     autoSync: boolean;
   };
+  aiProvider?: AiProviderInfo | null;
 }
 
 export interface StudentStats {
@@ -76,6 +86,8 @@ interface AppState {
   logout: () => void;
   dismissIntroCard: () => void;
   refreshStudent: () => Promise<void>;
+  saveAiProvider: (cfg: { providerId: string; baseUrl?: string; apiKey?: string; model?: string }) => Promise<{ ok: boolean; error?: string; provider?: AiProviderInfo | null }>;
+  clearAiProvider: () => Promise<{ ok: boolean; error?: string }>;
 
   setView: (v: View) => void;
   toggleSidebar: () => void;
@@ -214,6 +226,36 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     } catch {
       /* silent */
+    }
+  },
+
+  saveAiProvider: async cfg => {
+    try {
+      const res = await apiFetch('/api/ai-provider', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg),
+      });
+      const data = await readJson<{ ok?: boolean; error?: string; provider?: AiProviderInfo }>(res);
+      if (!res.ok) return { ok: false, error: data.error || `Save failed (${res.status})` };
+      const s = get().student;
+      if (s) set({ student: { ...s, aiProvider: data.provider || null } });
+      return { ok: true, provider: data.provider || null };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Save failed' };
+    }
+  },
+
+  clearAiProvider: async () => {
+    try {
+      const res = await apiFetch('/api/ai-provider', { method: 'DELETE' });
+      const data = await readJson<{ ok?: boolean; error?: string }>(res);
+      if (!res.ok) return { ok: false, error: data.error || `Reset failed (${res.status})` };
+      const s = get().student;
+      if (s) set({ student: { ...s, aiProvider: null } });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Reset failed' };
     }
   },
 

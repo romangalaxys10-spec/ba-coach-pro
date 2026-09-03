@@ -1,7 +1,12 @@
 /**
- * Unified AI client with three resolution modes.
+ * Unified AI client with four resolution modes.
  *
- * Resolution order (for every model call — LLM, TTS, ASR):
+ * Resolution order (for every LLM call):
+ *  0. The STUDENT'S OWN custom provider (Settings → AI Provider) — an
+ *     OpenAI-compatible base URL + key + model saved on their account
+ *     (Z.ai Coding Plan, NVIDIA NIM, OpenCode Zen, OpenAdapter, or any
+ *     custom endpoint). Takes priority because it is the student's explicit
+ *     choice and their own paid key.
  *  1. `AI_TUNNEL_URL` (+ optional `AI_TUNNEL_KEY`) — proxy tunnel: forward the
  *     call to a host that CAN reach the Z.ai internal models (e.g. the app's
  *     own preview running inside a Z.ai sandbox, same as space-z.ai). This is
@@ -12,6 +17,8 @@
  *     — direct OpenAI-compatible calls (LLM only). Works on any host.
  *  3. `z-ai-web-dev-sdk` — reads the standard .z-ai-config file chain. Works in
  *     the Z.ai dev sandbox and self-hosted environments that provide one.
+ *
+ * TTS/ASR always use modes 1–3 (custom providers are OpenAI LLM endpoints).
  *
  * If none is available, callers get a clear, actionable error instead of a
  * cryptic network failure.
@@ -75,22 +82,54 @@ async function tunnelCall<T>(payload: Record<string, unknown>, timeoutMs: number
 /* LLM                                                                 */
 /* ------------------------------------------------------------------ */
 
-async function callViaEnvKey(messages: ChatMsg[]): Promise<string> {
-  const res = await fetch(`${ENV_BASE}/chat/completions`, {
+async function callViaSdk(messages: ChatMsg[]): Promise<string> {
+  const ZAI = (await import('z-ai-web-dev-sdk')).default;
+  const zai = await ZAI.create();
+  type SdkBody = Parameters<typeof zai.chat.completions.create>[0];
+  const completion = await zai.chat.completions.create({
+    messages: messages as SdkBody['messages'],
+    thinking: { type: 'disabled' },
+  });
+  const content = completion.choices?.[0]?.message?.content;
+  if (!content || !content.trim()) throw new Error('Empty response from model');
+  return content;
+}
+
+/* ------------------------------------------------------------------ */
+/* Generic OpenAI-compatible transport (env key + student providers)   */
+/* ------------------------------------------------------------------ */
+
+export interface StudentAIOverride {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
+const isZaiHost = (base: string) => /(^|\.)z\.ai($|:|\/)/i.test(base);
+
+/** One OpenAI chat/completions call against an arbitrary compatible base URL. */
+async function callViaOpenAI(
+  messages: ChatMsg[],
+  base: string,
+  apiKey: string,
+  model: string,
+  timeoutMs = 180_000
+): Promise<string> {
+  // `thinking` is a Z.ai-only extension — other providers reject unknown args.
+  const body: Record<string, unknown> = { model, messages };
+  if (isZaiHost(base)) body.thinking = { type: 'disabled' };
+
+  const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${ENV_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: process.env.ZAI_MODEL || 'glm-4.7',
-      messages,
-      thinking: { type: 'disabled' },
-    } as Record<string, unknown>),
-    signal: AbortSignal.timeout(180_000),
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
-    const text = (await res.text().catch(() => '')).slice(0, 200);
+    const text = (await res.text().catch(() => '')).slice(0, 240);
     throw new Error(`AI endpoint responded ${res.status}: ${text}`);
   }
   const data = (await res.json()) as {
@@ -101,17 +140,25 @@ async function callViaEnvKey(messages: ChatMsg[]): Promise<string> {
   return content;
 }
 
-async function callViaSdk(messages: ChatMsg[]): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
-  const completion = await zai.chat.completions.create({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    messages: messages as any,
-    thinking: { type: 'disabled' },
-  });
-  const content = completion.choices?.[0]?.message?.content;
-  if (!content || !content.trim()) throw new Error('Empty response from model');
-  return content;
+/**
+ * One LLM call against a student-configured provider.
+ * Exported for the Settings → AI Provider "Test connection" endpoint.
+ */
+export async function callLLMCustom(
+  messages: ChatMsg[],
+  override: StudentAIOverride,
+  timeoutMs = 60_000
+): Promise<string> {
+  return callViaOpenAI(messages, override.baseUrl, override.apiKey, override.model, timeoutMs);
+}
+
+async function callViaEnvKey(messages: ChatMsg[]): Promise<string> {
+  return callViaOpenAI(
+    messages,
+    ENV_BASE,
+    ENV_KEY,
+    process.env.ZAI_MODEL || 'glm-4.7'
+  );
 }
 
 /** Direct resolution (env key → SDK). Used by the tunnel endpoint itself. */
@@ -140,8 +187,27 @@ export async function callLLMDirect(messages: ChatMsg[], retries = 2): Promise<s
   }
 }
 
-/** Tunnel-aware LLM entry point used by all feature routes. */
-export async function callLLM(messages: ChatMsg[], retries = 2): Promise<string> {
+/**
+ * Tunnel-aware LLM entry point used by all feature routes.
+ * `override` (the student's own provider) always wins when present.
+ */
+export async function callLLM(
+  messages: ChatMsg[],
+  retries = 2,
+  override?: StudentAIOverride | null
+): Promise<string> {
+  if (override) {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await callLLMCustom(messages, override);
+      } catch (e) {
+        lastErr = e;
+        if (attempt < retries) await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error('Custom AI provider call failed');
+  }
   if (envTunnelUrl()) {
     let lastErr: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {

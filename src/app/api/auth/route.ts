@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { generateStudentToken, normalizeToken, getAuthedStudent } from '@/lib/auth';
+import { publicProviderState } from '@/lib/ai-providers';
 
 export const maxDuration = 60;
 
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
         data: { name, token },
       });
       return NextResponse.json({
-        student: { id: student.id, name: student.name, token, createdAt: student.createdAt, github: { paired: false, owner: null, repo: null, lastSyncAt: null, autoSync: true } },
+        student: { id: student.id, name: student.name, token, createdAt: student.createdAt, github: { paired: false, owner: null, repo: null, lastSyncAt: null, autoSync: true }, aiProvider: publicProviderState(student) },
         token,
         isNew: true,
       });
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
       }
       await db.student.update({ where: { id: student.id }, data: { lastActiveAt: new Date() } });
       return NextResponse.json({
-        student: { id: student.id, name: student.name, token, createdAt: student.createdAt, github: { paired: Boolean(student.githubToken && student.githubRepo), owner: student.githubOwner, repo: student.githubRepo, lastSyncAt: student.githubSyncedAt, autoSync: student.autoSync } },
+        student: { id: student.id, name: student.name, token, createdAt: student.createdAt, github: { paired: Boolean(student.githubToken && student.githubRepo), owner: student.githubOwner, repo: student.githubRepo, lastSyncAt: student.githubSyncedAt, autoSync: student.autoSync }, aiProvider: publicProviderState(student) },
         token,
         isNew: false,
       });
@@ -76,6 +77,7 @@ export async function GET(req: NextRequest) {
         lastSyncAt: student.githubSyncedAt,
         autoSync: student.autoSync,
       },
+      aiProvider: publicProviderState(student),
     },
     stats: { conversations, lessonsCompleted, quizAttempts, flashcards },
   });

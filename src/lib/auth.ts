@@ -42,6 +42,12 @@ export type AuthedStudent = {
   githubSyncedAt: Date | null;
   autoSync: boolean;
   hasGithubToken: boolean;
+  // custom AI provider (OpenAI-compatible) saved on the student's account
+  aiProviderId: string | null;
+  aiBaseUrl: string | null;
+  aiApiKey: string | null;
+  aiModel: string | null;
+  aiVerifiedAt: Date | null;
 };
 
 export async function getAuthedStudent(req: NextRequest): Promise<AuthedStudent | null> {
@@ -68,6 +74,11 @@ export async function getAuthedStudent(req: NextRequest): Promise<AuthedStudent 
     githubSyncedAt: student.githubSyncedAt,
     autoSync: student.autoSync,
     hasGithubToken: Boolean(student.githubToken),
+    aiProviderId: student.aiProviderId,
+    aiBaseUrl: student.aiBaseUrl,
+    aiApiKey: student.aiApiKey,
+    aiModel: student.aiModel,
+    aiVerifiedAt: student.aiVerifiedAt,
   };
 }
 

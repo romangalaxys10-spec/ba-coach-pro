@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
 import { callLLM } from '@/lib/ai';
+import { studentAIOverride } from '@/lib/ai-providers';
 
 export const maxDuration = 300;
 
@@ -26,6 +27,9 @@ function extractJson(raw: string): unknown {
 
 export async function POST(req: NextRequest) {
   try {
+    const student = await getAuthedStudent(req);
+    if (!student) return unauthorized();
+
     const { skillSlug, category, count = 6 } = await req.json();
     const n = Math.min(12, Math.max(3, Number(count) || 6));
 
@@ -63,10 +67,14 @@ Rules:
 - answers must be self-contained and precise
 - no card numbering inside the text`;
 
-    const raw = await callLLM([
-      { role: 'assistant', content: system },
-      { role: 'user', content: `Generate ${n} flashcards now.` },
-    ]);
+    const raw = await callLLM(
+      [
+        { role: 'assistant', content: system },
+        { role: 'user', content: `Generate ${n} flashcards now.` },
+      ],
+      2,
+      studentAIOverride(student)
+    );
 
     const parsed = extractJson(raw) as { cards?: Flashcard[] } | Flashcard[];
     const cards = Array.isArray(parsed) ? parsed : parsed.cards || [];

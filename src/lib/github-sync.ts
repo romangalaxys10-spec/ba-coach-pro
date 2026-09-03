@@ -174,6 +174,13 @@ export async function buildStudentExport(studentId: string) {
       createdAt: student.createdAt,
       registeredAt: student.createdAt,
       lastActiveAt: student.lastActiveAt,
+      // custom AI provider — the API key is intentionally NOT exported (secret)
+      aiProvider: {
+        providerId: student.aiProviderId,
+        baseUrl: student.aiBaseUrl,
+        model: student.aiModel,
+        keyMasked: student.aiApiKey ? `${student.aiApiKey.slice(0, 4)}••••` : null,
+      },
     },
     progress: {
       lessons: student.lessonProgress.map(l => ({ itemId: l.itemId, completed: l.completed, updatedAt: l.updatedAt })),

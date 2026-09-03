@@ -19,6 +19,13 @@ model Student {
   githubOwner    String?
   githubSyncedAt DateTime?
   autoSync       Boolean  @default(true)
+  // Custom AI provider (student's own OpenAI-compatible key) — overrides the
+  // deployment-wide AI for this student's chats/quizzes/flashcards
+  aiProviderId   String?  // preset id: zai-coding | nvidia-nim | opencode-zen | openadapter | custom
+  aiBaseUrl      String?
+  aiApiKey       String?
+  aiModel        String?
+  aiVerifiedAt   DateTime?
   conversations  Conversation[]
   quizAttempts   QuizAttempt[]
   lessonProgress LessonProgress[]

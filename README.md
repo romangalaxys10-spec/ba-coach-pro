@@ -157,6 +157,31 @@ Browser → Vercel (no key, no SDK) ──AI_TUNNEL_URL──▶ Z.ai sandbox pr
 
 ---
 
+## 🔌 Bring Your Own AI — custom providers per student
+
+Every student can plug **their own AI key** into their profile (Settings → **AI provider**). Their key is used for *their* chats, quizzes and flashcards — it wins over the deployment-wide AI (tunnel / `ZAI_API_KEY` / SDK) wherever they log in.
+
+One-click presets with verified endpoints:
+
+| Preset | Base URL (OpenAI-compatible) | Example models | Key from |
+|---|---|---|---|
+| 🟢 Z.ai Coding Plan | `https://api.z.ai/api/coding/paas/v4` | `glm-4.7`, `glm-4.6`, `glm-4.5` | z.ai subscribe |
+| 🟩 NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.3-70b-instruct`, `deepseek-ai/deepseek-r1` | build.nvidia.com (free tier) |
+| 🔵 OpenCode Zen | `https://opencode.ai/zen/v1` | `code-supernova`, `grok-code`, `kimi-k2.7` | opencode.ai/auth |
+| 🟠 OpenAdapter | `https://api.openadapter.dev/v1` | any of the 79+ aggregated models | openadapter.dev |
+| ⚙️ Custom | any OpenAI-compatible URL | e.g. OpenRouter, Groq, DeepSeek, local Ollama | — |
+
+**How it works:**
+
+1. Pick a preset (or *Custom*), paste your API key, choose a model → **Save & test connection** (a tiny live completion verifies the key, URL and model, with human-friendly errors for 401/404/429/DNS).
+2. Just chat. The gateway (`src/lib/ai.ts`) resolves the student's own provider **first**, then falls back to the deployment chain:
+   `student provider → AI_TUNNEL_URL → ZAI_API_KEY → z-ai-web-dev-sdk`.
+3. Security: the key is stored server-side on the student's account, **never returned to any client** (masked display only, e.g. `test••••5678`), and **never synced to GitHub** backups. Changing the key re-requires a fresh test; removing the provider returns the student to the deployment default.
+
+**API:** `GET/PUT/DELETE /api/ai-provider` (masked state / save / reset) · `POST /api/ai-provider/test` (live verification, 45 s timeout).
+
+---
+
 ## 🏛️ The Harvard-Inspired Learning Experience
 
 The UX borrows deliberately from elite university course portals — the parts that make learners feel they've joined something serious:
