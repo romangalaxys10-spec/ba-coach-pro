@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Conversation {
+  id        String    @id @default(cuid())
+  title     String    @default("New conversation")
+  mode      String    @default("coach") // coach | skill | interviewer
+  skillSlug String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  messages  Message[]
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // user | assistant
+  content        String
+  createdAt      DateTime     @default(now())
+}
+
+model QuizAttempt {
+  id          String   @id @default(cuid())
+  skillSlug   String
+  category    String
+  score       Int
+  total       Int
+  details     String   @default("[]") // JSON array of {question, chosen, correct, isCorrect}
+  createdAt   DateTime @default(now())
+}
+
+model LessonProgress {
+  id        String   @id @default(cuid())
+  itemId    String   @unique // skill slug
+  completed Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
+
+model FlashcardStat {
+  id         String   @id @default(cuid())
+  skillSlug  String
+  known      Int      @default(0)
+  total      Int      @default(0)
+  updatedAt  DateTime @updatedAt
+}
