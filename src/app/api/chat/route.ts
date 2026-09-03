@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { buildCoachPrompt, buildInterviewerScenario, type ChatMode } from '@/lib/coach-prompt';
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
+import { callLLM } from '@/lib/ai';
 
 export const maxDuration = 300;
 
@@ -12,28 +13,6 @@ interface ChatBody {
   mode?: ChatMode;
   skillSlug?: string | null;
   scenario?: { domain?: string; role?: string; difficulty?: string };
-}
-
-async function callLLM(messages: { role: string; content: string }[], retries = 2): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const completion = await zai.chat.completions.create({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        messages: messages as any,
-        thinking: { type: 'disabled' },
-      });
-      const content = completion.choices[0]?.message?.content;
-      if (!content || !content.trim()) throw new Error('Empty response from model');
-      return content;
-    } catch (e) {
-      lastErr = e;
-      if (attempt < retries) await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error('LLM call failed');
 }
 
 export async function POST(req: NextRequest) {

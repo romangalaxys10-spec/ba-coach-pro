@@ -3,6 +3,7 @@ import { getSkill, BA_SKILLS } from '@/data/skills-data';
 import { db } from '@/lib/db';
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
+import { callLLM } from '@/lib/ai';
 
 export const maxDuration = 300;
 
@@ -62,17 +63,10 @@ Rules:
 - answers must be self-contained and precise
 - no card numbering inside the text`;
 
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    const zai = await ZAI.create();
-    const completion = await zai.chat.completions.create({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      messages: [
-        { role: 'assistant', content: system },
-        { role: 'user', content: `Generate ${n} flashcards now.` },
-      ] as any,
-      thinking: { type: 'disabled' },
-    });
-    const raw = completion.choices[0]?.message?.content || '';
+    const raw = await callLLM([
+      { role: 'assistant', content: system },
+      { role: 'user', content: `Generate ${n} flashcards now.` },
+    ]);
 
     const parsed = extractJson(raw) as { cards?: Flashcard[] } | Flashcard[];
     const cards = Array.isArray(parsed) ? parsed : parsed.cards || [];

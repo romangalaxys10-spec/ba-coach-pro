@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { getSkill, BA_SKILLS } from '@/data/skills-data';
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
+import { callLLM } from '@/lib/ai';
 
 export const maxDuration = 300;
 
@@ -23,19 +24,6 @@ function extractJson(raw: string): unknown {
     }
     throw new Error('Model did not return valid JSON');
   }
-}
-
-async function callLLM(messages: { role: string; content: string }[]): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
-  const completion = await zai.chat.completions.create({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    messages: messages as any,
-    thinking: { type: 'disabled' },
-  });
-  const content = completion.choices[0]?.message?.content;
-  if (!content) throw new Error('Empty response');
-  return content;
 }
 
 export async function POST(req: NextRequest) {
