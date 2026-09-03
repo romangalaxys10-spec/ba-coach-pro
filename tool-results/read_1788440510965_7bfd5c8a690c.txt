@@ -1,0 +1,605 @@
+     1→'use client';
+     2→
+     3→import { useState } from 'react';
+     4→import { BA_SKILLS, CATEGORY_META } from '@/data/skills-data';
+     5→import { BA_CASES } from '@/data/cases-data';
+     6→import { useAppStore } from '@/lib/store';
+     7→import { apiFetch, readJson } from '@/lib/client-api';
+     8→import { Markdown } from '@/components/markdown';
+     9→import { Button } from '@/components/ui/button';
+    10→import { Badge } from '@/components/ui/badge';
+    11→import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
+    12→import {
+    13→  Dialog,
+    14→  DialogContent,
+    15→  DialogDescription,
+    16→  DialogHeader,
+    17→  DialogTitle,
+    18→} from '@/components/ui/dialog';
+    19→import {
+    20→  Dumbbell,
+    21→  BrainCircuit,
+    22→  Layers,
+    23→  Target,
+    24→  Briefcase,
+    25→  Sparkles,
+    26→  RotateCcw,
+    27→  CheckCircle2,
+    28→  XCircle,
+    29→  ChevronLeft,
+    30→  ChevronRight,
+    31→  FlipHorizontal2,
+    32→  GraduationCap,
+    33→  Play,
+    34→  Loader2,
+    35→  BookOpen,
+    36→  Award,
+    37→} from 'lucide-react';
+    38→import { cn } from '@/lib/utils';
+    39→
+    40→type Tab = 'quiz' | 'flashcards' | 'interview' | 'cases';
+    41→
+    42→interface QuizQuestion {
+    43→  question: string;
+    44→  options: string[];
+    45→  answerIndex: number;
+    46→  explanation: string;
+    47→}
+    48→
+    49→interface Flashcard {
+    50→  front: string;
+    51→  back: string;
+    52→}
+    53→
+    54→export function PracticeView() {
+    55→  const [tab, setTab] = useState<Tab>('quiz');
+    56→
+    57→  return (
+    58→    <div className="thin-scroll h-full overflow-y-auto">
+    59→      <div className="mx-auto max-w-5xl px-4 py-8">
+    60→        <header className="mb-6">
+    61→          <h1 className="font-display text-2xl font-semibold tracking-tight">Practice Arena</h1>
+    62→          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+    63→            Sharpen your craft the way serious analysts do: exam-style drills, spaced-repetition flashcards,
+    64→            live stakeholder rehearsal, and case-method analysis.
+    65→          </p>
+    66→        </header>
+    67→
+    68→        <div className="mb-6 flex flex-wrap gap-2">
+    69→          <TabChip active={tab === 'quiz'} onClick={() => setTab('quiz')} icon={BrainCircuit} label="Skill Quizzes" />
+    70→          <TabChip active={tab === 'flashcards'} onClick={() => setTab('flashcards')} icon={Layers} label="Flashcards" />
+    71→          <TabChip active={tab === 'interview'} onClick={() => setTab('interview')} icon={Target} label="Interview Simulator" />
+    72→          <TabChip active={tab === 'cases'} onClick={() => setTab('cases')} icon={Briefcase} label="Case Method" harvard />
+    73→        </div>
+    74→
+    75→        {tab === 'quiz' && <QuizTab />}
+    76→        {tab === 'flashcards' && <FlashcardsTab />}
+    77→        {tab === 'interview' && <InterviewTab />}
+    78→        {tab === 'cases' && <CasesTab />}
+    79→      </div>
+    80→    </div>
+    81→  );
+    82→}
+    83→
+    84→function TabChip({ active, onClick, icon: Icon, label, harvard }: { active: boolean; onClick: () => void; icon: typeof Layers; label: string; harvard?: boolean }) {
+    85→  return (
+    86→    <button
+    87→      onClick={onClick}
+    88→      className={cn(
+    89→        'flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition',
+    90→        active
+    91→          ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+    92→          : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
+    93→      )}
+    94→    >
+    95→      <Icon className="h-4 w-4" />
+    96→      {label}
+    97→      {harvard && <span className="rounded bg-[#a51c30] px-1 text-[9px] font-bold text-white">CASE</span>}
+    98→    </button>
+    99→  );
+   100→}
+   101→
+   102→/* ---------------- shared scope selector ---------------- */
+   103→
+   104→function SkillScopeSelect({ value, onChange, allowMixed = true }: { value: string; onChange: (v: string) => void; allowMixed?: boolean }) {
+   105→  return (
+   106→    <Select value={value} onValueChange={onChange}>
+   107→      <SelectTrigger className="w-full sm:w-72">
+   108→        <SelectValue placeholder="Choose a skill…" />
+   109→      </SelectTrigger>
+   110→      <SelectContent className="max-h-80">
+   111→        {allowMixed && <SelectItem value="mixed">Mixed — all 53 skills</SelectItem>}
+   112→        {Object.entries(CATEGORY_META).map(([cat, meta]) => (
+   113→          <SelectGroup key={cat}>
+   114→            <SelectLabel>{meta.label}</SelectLabel>
+   115→            {BA_SKILLS.filter(s => s.category === cat).map(s => (
+   116→              <SelectItem key={s.slug} value={s.slug}>
+   117→                {s.name}
+   118→              </SelectItem>
+   119→            ))}
+   120→          </SelectGroup>
+   121→        ))}
+   122→      </SelectContent>
+   123→    </Select>
+   124→  );
+   125→}
+   126→
+   127→/* ---------------- quiz ---------------- */
+   128→
+   129→function QuizTab() {
+   130→  const [scope, setScope] = useState('mixed');
+   131→  const [difficulty, setDifficulty] = useState('mixed');
+   132→  const [questions, setQuestions] = useState<QuizQuestion[] | null>(null);
+   133→  const [loading, setLoading] = useState(false);
+   134→  const [idx, setIdx] = useState(0);
+   135→  const [chosen, setChosen] = useState<number | null>(null);
+   136→  const [answers, setAnswers] = useState<{ q: string; chosen: number; correct: number; ok: boolean }[]>([]);
+   137→  const [finished, setFinished] = useState(false);
+   138→
+   139→  const generate = async () => {
+   140→    setLoading(true);
+   141→    setQuestions(null);
+   142→    setFinished(false);
+   143→    setIdx(0);
+   144→    setChosen(null);
+   145→    setAnswers([]);
+   146→    try {
+   147→      const isCategory = ['mixed', ...Object.keys(CATEGORY_META)].includes(scope);
+   148→      const res = await apiFetch('/api/quiz', {
+   149→        method: 'POST',
+   150→        body: JSON.stringify({
+   151→          skillSlug: isCategory ? undefined : scope,
+   152→          category: isCategory ? scope : undefined,
+   153→          difficulty,
+   154→          count: 5,
+   155→        }),
+   156→      });
+   157→      const data = await readJson<{ error?: string; questions?: QuizQuestion[] }>(res);
+   158→      if (!res.ok || data.error) throw new Error(data.error);
+   159→      setQuestions(data.questions || []);
+   160→    } catch {
+   161→      setQuestions([]);
+   162→    } finally {
+   163→      setLoading(false);
+   164→    }
+   165→  };
+   166→
+   167→  const submit = () => {
+   168→    if (chosen === null || !questions) return;
+   169→    const q = questions[idx];
+   170→    const ok = chosen === q.answerIndex;
+   171→    setAnswers(a => [...a, { q: q.question, chosen, correct: q.answerIndex, ok }]);
+   172→    if (idx + 1 < questions.length) {
+   173→      setIdx(idx + 1);
+   174→      setChosen(null);
+   175→    } else {
+   176→      setFinished(true);
+   177→    }
+   178→  };
+   179→
+   180→  const score = answers.filter(a => a.ok).length;
+   181→  const pct = answers.length ? Math.round((score / answers.length) * 100) : 0;
+   182→
+   183→  return (
+   184→    <div>
+   185→      <div className="rounded-2xl border border-border/70 bg-card p-5">
+   186→        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+   187→          <div className="flex-1 space-y-1.5">
+   188→            <label className="text-xs font-medium text-muted-foreground">Scope</label>
+   189→            <SkillScopeSelect value={scope} onChange={setScope} />
+   190→          </div>
+   191→          <div className="space-y-1.5">
+   192→            <label className="text-xs font-medium text-muted-foreground">Difficulty</label>
+   193→            <Select value={difficulty} onValueChange={setDifficulty}>
+   194→              <SelectTrigger className="w-full sm:w-40"><SelectValue /></SelectTrigger>
+   195→              <SelectContent>
+   196→                <SelectItem value="easy">Easy — recall</SelectItem>
+   197→                <SelectItem value="medium">Medium — apply</SelectItem>
+   198→                <SelectItem value="hard">Hard — judge</SelectItem>
+   199→                <SelectItem value="mixed">Mixed</SelectItem>
+   200→              </SelectContent>
+   201→            </Select>
+   202→          </div>
+   203→          <Button onClick={() => void generate()} disabled={loading} className="gap-2">
+   204→            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+   205→            {loading ? 'Writing exam…' : 'Generate quiz'}
+   206→          </Button>
+   207→        </div>
+   208→        <p className="mt-3 text-xs text-muted-foreground">
+   209→          Five CBAP-style multiple-choice questions written fresh by your coach every time.
+   210→        </p>
+   211→      </div>
+   212→
+   213→      {loading && (
+   214→        <div className="mt-6 flex items-center gap-3 rounded-xl border border-border/60 bg-card p-4 text-sm text-muted-foreground">
+   215→          <Loader2 className="h-4 w-4 animate-spin text-primary" /> Your coach is writing fresh exam questions…
+   216→        </div>
+   217→      )}
+   218→
+   219→      {questions && questions.length === 0 && !loading && (
+   220→        <div className="mt-6 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm">
+   221→          Quiz generation failed. Please try again.
+   222→        </div>
+   223→      )}
+   224→
+   225→      {questions && questions.length > 0 && !finished && (
+   226→        <div className="mt-6 rounded-2xl border border-border/70 bg-card p-6">
+   227→          <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
+   228→            <span>Question {idx + 1} of {questions.length}</span>
+   229→            <span>Score {score}/{answers.length}</span>
+   230→          </div>
+   231→          <div className="mb-2 h-1 w-full overflow-hidden rounded-full bg-muted">
+   232→            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${((idx + (chosen !== null ? 1 : 0)) / questions.length) * 100}%` }} />
+   233→          </div>
+   234→          <h3 className="mb-4 mt-4 text-base font-medium leading-snug">{questions[idx].question}</h3>
+   235→          <div className="space-y-2">
+   236→            {questions[idx].options.map((opt, i) => (
+   237→              <button
+   238→                key={i}
+   239→                onClick={() => setChosen(i)}
+   240→                className={cn(
+   241→                  'flex w-full items-start gap-3 rounded-xl border p-3 text-left text-sm transition',
+   242→                  chosen === i
+   243→                    ? 'border-primary bg-primary/10'
+   244→                    : 'border-border/70 hover:border-primary/40 hover:bg-accent/40'
+   245→                )}
+   246→              >
+   247→                <span className={cn(
+   248→                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold',
+   249→                  chosen === i ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground'
+   250→                )}>
+   251→                  {String.fromCharCode(65 + i)}
+   252→                </span>
+   253→                {opt}
+   254→              </button>
+   255→            ))}
+   256→          </div>
+   257→          <Button className="mt-5 w-full" onClick={submit} disabled={chosen === null}>
+   258→            {idx + 1 === questions.length ? 'Finish quiz' : 'Next question'}
+   259→          </Button>
+   260→        </div>
+   261→      )}
+   262→
+   263→      {finished && questions && (
+   264→        <div className="mt-6 rounded-2xl border border-border/70 bg-card p-6">
+   265→          <div className="mb-4 flex items-center gap-4">
+   266→            <div className={cn(
+   267→              'flex h-16 w-16 items-center justify-center rounded-2xl text-lg font-bold',
+   268→              pct >= 80 ? 'bg-primary/15 text-primary' : pct >= 50 ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-destructive/15 text-destructive'
+   269→            )}>
+   270→              {pct}%
+   271→            </div>
+   272→            <div>
+   273→              <h3 className="text-lg font-semibold">
+   274→                {pct >= 80 ? 'Outstanding — coach level.' : pct >= 50 ? 'Solid — keep drilling.' : 'Worth revisiting this skill.'}
+   275→              </h3>
+   276→              <p className="text-sm text-muted-foreground">You scored {score} out of {questions.length}.</p>
+   277→            </div>
+   278→          </div>
+   279→          <div className="mb-5 space-y-3">
+   280→            {answers.map((a, i) => (
+   281→              <div key={i} className={cn('rounded-xl border p-3 text-sm', a.ok ? 'border-primary/30 bg-primary/5' : 'border-destructive/30 bg-destructive/5')}>
+   282→                <div className="mb-1 flex items-start gap-2 font-medium">
+   283→                  {a.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />}
+   284→                  {a.q}
+   285→                </div>
+   286→                {!a.ok && (
+   287→                  <p className="pl-6 text-xs text-muted-foreground">
+   288→                    Correct: <span className="font-medium text-foreground">{String.fromCharCode(65 + a.correct)}. {questions[i]?.options[a.correct]}</span>
+   289→                    {questions[i]?.explanation ? ` — ${questions[i].explanation}` : ''}
+   290→                  </p>
+   291→                )}
+   292→              </div>
+   293→            ))}
+   294→          </div>
+   295→          <Button variant="outline" onClick={() => void generate()} className="gap-2">
+   296→            <RotateCcw className="h-4 w-4" /> Try a fresh quiz
+   297→          </Button>
+   298→        </div>
+   299→      )}
+   300→    </div>
+   301→  );
+   302→}
+   303→
+   304→/* ---------------- flashcards ---------------- */
+   305→
+   306→function FlashcardsTab() {
+   307→  const [scope, setScope] = useState('mixed');
+   308→  const [cards, setCards] = useState<Flashcard[] | null>(null);
+   309→  const [loading, setLoading] = useState(false);
+   310→  const [idx, setIdx] = useState(0);
+   311→  const [flipped, setFlipped] = useState(false);
+   312→  const [known, setKnown] = useState<Set<number>>(new Set());
+   313→
+   314→  const generate = async () => {
+   315→    setLoading(true);
+   316→    setCards(null);
+   317→    setIdx(0);
+   318→    setFlipped(false);
+   319→    setKnown(new Set());
+   320→    try {
+   321→      const isCategory = ['mixed', ...Object.keys(CATEGORY_META)].includes(scope);
+   322→      const res = await apiFetch('/api/flashcards', {
+   323→        method: 'POST',
+   324→        body: JSON.stringify({
+   325→          skillSlug: isCategory ? undefined : scope,
+   326→          category: isCategory ? scope : undefined,
+   327→          count: 8,
+   328→        }),
+   329→      });
+   330→      const data = await readJson<{ error?: string; cards?: Flashcard[] }>(res);
+   331→      if (!res.ok || data.error) throw new Error(data.error);
+   332→      setCards(data.cards || []);
+   333→    } catch {
+   334→      setCards([]);
+   335→    } finally {
+   336→      setLoading(false);
+   337→    }
+   338→  };
+   339→
+   340→  const mark = (knew: boolean) => {
+   341→    if (!cards) return;
+   342→    const next = new Set(known);
+   343→    if (knew) next.add(idx);
+   344→    else next.delete(idx);
+   345→    setKnown(next);
+   346→    if (idx + 1 < cards.length) {
+   347→      setIdx(idx + 1);
+   348→      setFlipped(false);
+   349→    }
+   350→  };
+   351→
+   352→  return (
+   353→    <div>
+   354→      <div className="rounded-2xl border border-border/70 bg-card p-5">
+   355→        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+   356→          <div className="flex-1 space-y-1.5">
+   357→            <label className="text-xs font-medium text-muted-foreground">Deck scope</label>
+   358→            <SkillScopeSelect value={scope} onChange={setScope} />
+   359→          </div>
+   360→          <Button onClick={() => void generate()} disabled={loading} className="gap-2">
+   361→            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Layers className="h-4 w-4" />}
+   362→            {loading ? 'Preparing deck…' : 'Generate flashcards'}
+   363→          </Button>
+   364→        </div>
+   365→        <p className="mt-3 text-xs text-muted-foreground">Spaced-repetition style cards, freshly generated per skill.</p>
+   366→      </div>
+   367→
+   368→      {loading && (
+   369→        <div className="mt-6 flex items-center gap-3 rounded-xl border border-border/60 bg-card p-4 text-sm text-muted-foreground">
+   370→          <Loader2 className="h-4 w-4 animate-spin text-primary" /> Preparing your deck…
+   371→        </div>
+   372→      )}
+   373→
+   374→      {cards && cards.length > 0 && (
+   375→        <div className="mt-6">
+   376→          <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
+   377→            <span>Card {idx + 1} of {cards.length}</span>
+   378→            <span className="flex items-center gap-1 text-primary"><CheckCircle2 className="h-3.5 w-3.5" /> {known.size} known</span>
+   379→          </div>
+   380→          <div className="flip-scene h-64 w-full" onClick={() => setFlipped(f => !f)} role="button" aria-label="Flip card">
+   381→            <div className={cn('flip-inner', flipped && 'flipped')}>
+   382→              <div className="flip-face flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-border/70 bg-card p-8 text-center shadow-sm">
+   383→                <Badge variant="outline" className="mb-4 text-[10px]">PROMPT</Badge>
+   384→                <p className="text-lg font-medium leading-snug">{cards[idx].front}</p>
+   385→                <span className="mt-6 flex items-center gap-1.5 text-xs text-muted-foreground">
+   386→                  <FlipHorizontal2 className="h-3.5 w-3.5" /> Click to reveal
+   387→                </span>
+   388→              </div>
+   389→              <div className="flip-face flip-face-back flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-primary/40 bg-primary/8 p-8 text-center shadow-sm">
+   390→                <Badge variant="outline" className="mb-4 text-[10px]">ANSWER</Badge>
+   391→                <p className="text-sm leading-relaxed">{cards[idx].back}</p>
+   392→              </div>
+   393→            </div>
+   394→          </div>
+   395→          <div className="mt-4 flex items-center justify-center gap-3">
+   396→            <Button variant="outline" className="gap-2" onClick={() => mark(false)}>
+   397→              <RotateCcw className="h-4 w-4" /> Review again
+   398→            </Button>
+   399→            <Button className="gap-2" onClick={() => mark(true)}>
+   400→              <CheckCircle2 className="h-4 w-4" /> I knew this
+   401→            </Button>
+   402→          </div>
+   403→          <div className="mt-4 flex justify-center gap-2">
+   404→            <Button variant="ghost" size="icon" disabled={idx === 0} onClick={() => { setIdx(idx - 1); setFlipped(false); }} aria-label="Previous card">
+   405→              <ChevronLeft className="h-4 w-4" />
+   406→            </Button>
+   407→            <Button variant="ghost" size="icon" disabled={idx === cards.length - 1} onClick={() => { setIdx(idx + 1); setFlipped(false); }} aria-label="Next card">
+   408→              <ChevronRight className="h-4 w-4" />
+   409→            </Button>
+   410→          </div>
+   411→        </div>
+   412→      )}
+   413→
+   414→      {cards && cards.length === 0 && !loading && (
+   415→        <div className="mt-6 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm">Card generation failed. Please try again.</div>
+   416→      )}
+   417→    </div>
+   418→  );
+   419→}
+   420→
+   421→/* ---------------- interview simulator ---------------- */
+   422→
+   423→const SCENARIO_DOMAINS = ['Auto — surprise me', 'Insurance claims overhaul', 'Hospital onboarding system', 'Retail loyalty redesign', 'Local government approvals', 'Telecom billing disputes', 'Logistics inventory upgrade'];
+   424→const ROLES = ['Auto — surprise me', 'Operations manager', 'Front-line team leader', 'Finance controller', 'Customer service rep', 'IT support lead', 'Compliance officer'];
+   425→
+   426→function InterviewTab() {
+   427→  const store = useAppStore();
+   428→  const [difficulty, setDifficulty] = useState('medium');
+   429→  const [domain, setDomain] = useState('Auto — surprise me');
+   430→  const [role, setRole] = useState('Auto — surprise me');
+   431→
+   432→  const start = () => {
+   433→    store.startInterviewer({
+   434→      difficulty,
+   435→      domain: domain.startsWith('Auto') ? undefined : domain,
+   436→      role: role.startsWith('Auto') ? undefined : role,
+   437→    });
+   438→    // opening line kicks the simulation off
+   439→    setTimeout(() => {
+   440→      void store.sendMessage(
+   441→        'Hello — I am the business analyst on this project. Thank you for making time. Could we start with you walking me through your typical day and where things cause you the most friction?',
+   442→        { mode: 'interviewer' }
+   443→      );
+   444→    }, 60);
+   445→  };
+   446→
+   447→  return (
+   448→    <div className="grid gap-4 md:grid-cols-2">
+   449→      <div className="rounded-2xl border border-border/70 bg-card p-6">
+   450→        <div className="mb-1 flex items-center gap-2">
+   451→          <Target className="h-5 w-5 text-primary" />
+   452→          <h3 className="font-semibold">Rehearse a live stakeholder interview</h3>
+   453→        </div>
+   454→        <p className="mb-5 text-sm text-muted-foreground">
+   455→          Your coach plays a realistic stakeholder — busy, vague, sometimes guarded. Practise open questions,
+   456→          probing, funnel structure and rapport. Ask for <code className="rounded bg-muted px-1 font-mono text-xs">END_SIM</code> any time
+   457→          to receive a full debrief with a score and missed opportunities. Voice mode recommended: turn on
+   458→          the mic and spoken replies in chat.
+   459→        </p>
+   460→        <div className="space-y-3">
+   461→          <div className="space-y-1.5">
+   462→            <label className="text-xs font-medium text-muted-foreground">Stakeholder disposition</label>
+   463→            <Select value={difficulty} onValueChange={setDifficulty}>
+   464→              <SelectTrigger><SelectValue /></SelectTrigger>
+   465→              <SelectContent>
+   466→                <SelectItem value="easy">Friendly — cooperative but vague</SelectItem>
+   467→                <SelectItem value="medium">Busy — cooperative, scattered</SelectItem>
+   468→                <SelectItem value="hard">Guarded — sceptical, defensive</SelectItem>
+   469→              </SelectContent>
+   470→            </Select>
+   471→          </div>
+   472→          <div className="space-y-1.5">
+   473→            <label className="text-xs font-medium text-muted-foreground">Scenario domain</label>
+   474→            <Select value={domain} onValueChange={setDomain}>
+   475→              <SelectTrigger><SelectValue /></SelectTrigger>
+   476→              <SelectContent>{SCENARIO_DOMAINS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+   477→            </Select>
+   478→          </div>
+   479→          <div className="space-y-1.5">
+   480→            <label className="text-xs font-medium text-muted-foreground">Stakeholder role</label>
+   481→            <Select value={role} onValueChange={setRole}>
+   482→              <SelectTrigger><SelectValue /></SelectTrigger>
+   483→              <SelectContent>{ROLES.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+   484→            </Select>
+   485→          </div>
+   486→          <Button onClick={start} className="w-full gap-2">
+   487→            <Play className="h-4 w-4" /> Start the simulation
+   488→          </Button>
+   489→        </div>
+   490→      </div>
+   491→      <div className="rounded-2xl border border-border/70 bg-gradient-to-br from-primary/10 to-transparent p-6">
+   492→        <h4 className="mb-3 text-sm font-semibold">What good looks like</h4>
+   493→        <ul className="space-y-2.5 text-sm text-muted-foreground">
+   494→          <li className="flex gap-2"><span className="text-primary">1.</span> Open with context-setting and permission, not interrogation.</li>
+   495→          <li className="flex gap-2"><span className="text-primary">2.</span> Use the funnel: broad open questions first, narrow with probes, confirm with summaries.</li>
+   496→          <li className="flex gap-2"><span className="text-primary">3.</span> Hunt for the workflow: &quot;walk me through the last time…&quot; beats &quot;do you like the system?&quot;</li>
+   497→          <li className="flex gap-2"><span className="text-primary">4.</span> Chase exceptions: &quot;what happens when…&quot;, &quot;what if it fails…&quot;, &quot;who handles it then?&quot;</li>
+   498→          <li className="flex gap-2"><span className="text-primary">5.</span> Quantify: volumes, frequencies, time lost — evidence, not adjectives.</li>
+   499→          <li className="flex gap-2"><span className="text-primary">6.</span> Close by checking understanding and agreeing next steps.</li>
+   500→        </ul>
+   501→      </div>
+   502→    </div>
+   503→  );
+   504→}
+   505→
+   506→/* ---------------- case method ---------------- */
+   507→
+   508→function CasesTab() {
+   509→  const store = useAppStore();
+   510→  const [openCase, setOpenCase] = useState<(typeof BA_CASES)[number] | null>(null);
+   511→
+   512→  const analyse = (c: (typeof BA_CASES)[number]) => {
+   513→    setOpenCase(null);
+   514→    store.startSkillCoaching(
+   515→      c.focusSkills[0],
+   516→      `CASE ANALYSIS — ${c.code}: ${c.title}\n\n${c.narrative}\n\nMY ROLE: ${c.yourRole}\n\nPlease run this as a Harvard-style case discussion: (1) ask me 1-2 penetrating questions about how I read the situation before giving me anything, (2) after I respond, coach me through a structured BA approach using ${c.focusSkills.join(', ')} — correct my reasoning where it is weak, (3) finish with a model answer outline I can compare against.`
+   517→    );
+   518→  };
+   519→
+   520→  return (
+   521→    <div>
+   522→      <div className="mb-5 rounded-2xl border border-border/70 bg-gradient-to-br from-[#a51c30]/10 to-transparent p-5">
+   523→        <div className="mb-1 flex items-center gap-2">
+   524→          <BookOpen className="h-5 w-5 text-[#a51c30]" />
+   525→          <h3 className="font-display font-semibold">The Case Method, applied to Business Analysis</h3>
+   526→        </div>
+   527→        <p className="text-sm text-muted-foreground">
+   528→          Inspired by the Harvard Business School classroom: no right answers on a slide — you defend a
+   529→          position, your coach challenges your reasoning Socratically, and technique emerges from the case.
+   530→          Six original cases across sectors, each mapped to the skills it exercises.
+   531→        </p>
+   532→      </div>
+   533→
+   534→      <div className="grid gap-4 md:grid-cols-2">
+   535→        {BA_CASES.map(c => (
+   536→          <div key={c.id} className="flex flex-col rounded-xl border border-border/70 bg-card p-5">
+   537→            <div className="mb-2 flex items-center justify-between">
+   538→              <span className="font-mono text-xs font-semibold text-[#a51c30]">{c.code}</span>
+   539→              <Badge variant="outline" className="text-[10px]">{c.difficulty}</Badge>
+   540→            </div>
+   541→            <h3 className="font-display text-base font-semibold leading-snug">{c.title}</h3>
+   542→            <p className="mt-1 text-xs text-muted-foreground">{c.sector}</p>
+   543→            <p className="mt-3 line-clamp-3 flex-1 text-xs leading-relaxed text-muted-foreground">{c.narrative}</p>
+   544→            <div className="mt-3 flex flex-wrap gap-1">
+   545→              {c.focusSkills.slice(0, 3).map(s => (
+   546→                <Badge key={s} variant="secondary" className="text-[10px] font-normal">{s.split('-').join(' ')}</Badge>
+   547→              ))}
+   548→            </div>
+   549→            <Button variant="outline" size="sm" className="mt-4 gap-2" onClick={() => setOpenCase(c)}>
+   550→              <BookOpen className="h-3.5 w-3.5" /> Read & analyse in classroom
+   551→            </Button>
+   552→          </div>
+   553→        ))}
+   554→      </div>
+   555→
+   556→      <Dialog open={!!openCase} onOpenChange={open => !open && setOpenCase(null)}>
+   557→        <DialogContent className="thin-scroll max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+   558→          {openCase && (
+   559→            <>
+   560→              <DialogHeader>
+   561→                <div className="mb-1 flex items-center gap-2">
+   562→                  <span className="font-mono text-xs font-semibold text-[#a51c30]">{openCase.code}</span>
+   563→                  <Badge variant="outline" className="text-[10px]">{openCase.difficulty}</Badge>
+   564→                </div>
+   565→                <DialogTitle className="font-display text-xl">{openCase.title}</DialogTitle>
+   566→                <DialogDescription>
+   567→                  {openCase.sector} · Learning objective: {openCase.learningObjective}
+   568→                </DialogDescription>
+   569→              </DialogHeader>
+   570→              <div className="space-y-5 text-sm">
+   571→                <div>
+   572→                  <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">The situation</h4>
+   573→                  <Markdown content={openCase.narrative} />
+   574→                </div>
+   575→                <div>
+   576→                  <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Your role</h4>
+   577→                  <p className="leading-relaxed">{openCase.yourRole}</p>
+   578→                </div>
+   579→                <div>
+   580→                  <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Discussion questions</h4>
+   581→                  <ol className="list-decimal space-y-1.5 pl-4 leading-relaxed">
+   582→                    {openCase.discussionQuestions.map((q, i) => <li key={i}>{q}</li>)}
+   583→                  </ol>
+   584→                </div>
+   585→                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+   586→                  <div className="flex items-center gap-2 text-sm font-medium">
+   587→                    <Award className="h-4 w-4 text-primary" /> How the classroom works
+   588→                  </div>
+   589→                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+   590→                    Your coach will open Socratically — expect questions before answers. Defend your read of
+   591→                    the case, get challenged, and finish with a model-answer outline mapped to the focus skills.
+   592→                  </p>
+   593→                </div>
+   594→                <Button onClick={() => analyse(openCase)} className="w-full gap-2">
+   595→                  <GraduationCap className="h-4 w-4" /> Enter the classroom
+   596→                </Button>
+   597→              </div>
+   598→            </>
+   599→          )}
+   600→        </DialogContent>
+   601→      </Dialog>
+   602→    </div>
+   603→  );
+   604→}
+   605→
