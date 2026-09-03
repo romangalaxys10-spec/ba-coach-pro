@@ -166,7 +166,7 @@ One-click presets with verified endpoints:
 | Preset | Base URL (OpenAI-compatible) | Example models | Key from |
 |---|---|---|---|
 | 🟢 Z.ai Coding Plan | `https://api.z.ai/api/coding/paas/v4` | `glm-4.7`, `glm-4.6`, `glm-4.5` | z.ai subscribe |
-| 🟩 NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.3-70b-instruct`, `deepseek-ai/deepseek-r1` | build.nvidia.com (free tier) |
+| 🟩 NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | `deepseek-v4-flash`, `kimi-k3`, `nemotron-3-ultra` | build.nvidia.com (free tier) |
 | 🔵 OpenCode Zen | `https://opencode.ai/zen/v1` | `code-supernova`, `grok-code`, `kimi-k2.7` | opencode.ai/auth |
 | 🟠 OpenAdapter | `https://api.openadapter.dev/v1` | any of the 79+ aggregated models | openadapter.dev |
 | ⚙️ Custom | any OpenAI-compatible URL | e.g. OpenRouter, Groq, DeepSeek, local Ollama | — |
