@@ -2,6 +2,7 @@
 
 import { useAppStore, type View } from '@/lib/store';
 import { getSkill } from '@/data/skills-data';
+import { computeCareerProgress, levelById } from '@/lib/levels';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -35,6 +36,10 @@ const NAV: { view: View; label: string; icon: typeof Library; hint?: string }[] 
 
 export function AppSidebar() {
   const store = useAppStore();
+  const career = computeCareerProgress(store.progressMap);
+  const currentLevel = levelById(career.currentLevelId);
+  const currentPct = career.levels.find(l => l.id === career.currentLevelId)?.pct ?? 0;
+  const levelComplete = career.levels.find(l => l.id === career.currentLevelId)?.status === 'complete';
 
   return (
     <aside
@@ -91,6 +96,36 @@ export function AppSidebar() {
           </button>
         ))}
       </nav>
+
+      {/* career level card */}
+      <button
+        onClick={() => store.setView('learn')}
+        className="mx-3 mt-4 rounded-xl border border-sidebar-border bg-card/60 p-3 text-left transition hover:border-primary/40"
+        title="Open Learning Tracks"
+      >
+        <div className="flex items-center gap-2">
+          <currentLevel.icon className={cn('h-4 w-4 shrink-0', currentLevel.color)} />
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Career level
+          </span>
+          <span className={cn('ml-auto text-[11px] font-bold', currentLevel.color)}>
+            {currentLevel.short} · {currentPct}%
+          </span>
+        </div>
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className={cn('h-full rounded-full transition-all', currentLevel.bar)}
+            style={{ width: `${currentPct}%` }}
+          />
+        </div>
+        <div className="mt-1.5 text-[10px] text-muted-foreground">
+          {levelComplete
+            ? 'Level mastered — next level unlocked'
+            : career.overallDone === 0
+              ? 'Start the Junior track to begin'
+              : `${career.overallDone}/${career.overallTotal} programme lessons done`}
+        </div>
+      </button>
 
       <div className="mx-4 mt-4 border-t border-sidebar-border" />
       <div className="px-4 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">

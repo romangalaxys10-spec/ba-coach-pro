@@ -95,7 +95,7 @@ export async function markModelUnavailable(
     where: { id: studentId },
     select: { aiRetiredModels: true },
   });
-  const current = retiredModelsOf(student);
+  const current = retiredModelsOf(student ?? { aiRetiredModels: null });
   if (!current.includes(modelId)) current.push(modelId);
   await persistRetired(studentId, current);
   // invalidate any cached list — it still contains the dead model

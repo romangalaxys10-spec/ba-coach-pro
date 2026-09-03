@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { BA_SKILLS, CATEGORY_META, type BASkill } from '@/data/skills-data';
 import { useAppStore } from '@/lib/store';
+import { BA_LEVELS, SKILL_LEVEL, levelById, type LevelId } from '@/lib/levels';
 import { Markdown } from '@/components/markdown';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,12 +30,14 @@ export function SkillsLibrary() {
   const store = useAppStore();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string>('all');
+  const [level, setLevel] = useState<LevelId | 'all'>('all');
   const [selected, setSelected] = useState<BASkill | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
     return BA_SKILLS.filter(s => {
       if (category !== 'all' && s.category !== category) return false;
+      if (level !== 'all' && SKILL_LEVEL[s.slug] !== level) return false;
       if (!q) return true;
       return (
         s.name.toLowerCase().includes(q) ||
@@ -43,7 +46,7 @@ export function SkillsLibrary() {
         s.purpose.toLowerCase().includes(q)
       );
     });
-  }, [query, category]);
+  }, [query, category, level]);
 
   const coach = (skill: BASkill) => {
     setSelected(null);
@@ -76,6 +79,42 @@ export function SkillsLibrary() {
           </div>
         </div>
 
+        {/* career level filter */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Level</span>
+          <button
+            onClick={() => setLevel('all')}
+            className={cn(
+              'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition',
+              level === 'all'
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
+            )}
+          >
+            All <span className={cn('rounded-full px-1.5 text-[10px]', level === 'all' ? 'bg-white/20' : 'bg-muted')}>{BA_SKILLS.length}</span>
+          </button>
+          {BA_LEVELS.map(lv => {
+            const count = BA_SKILLS.filter(s => SKILL_LEVEL[s.slug] === lv.id).length;
+            const Icon = lv.icon;
+            return (
+              <button
+                key={lv.id}
+                onClick={() => setLevel(lv.id)}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition',
+                  level === lv.id
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {lv.short}
+                <span className={cn('rounded-full px-1.5 text-[10px]', level === lv.id ? 'bg-white/20' : 'bg-muted')}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+
         <div className="mb-6 flex flex-wrap gap-2">
           <CategoryChip
             active={category === 'all'}
@@ -105,19 +144,27 @@ export function SkillsLibrary() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map(skill => {
             const Icon = CATEGORY_ICONS[skill.category] || Puzzle;
+            const skillLevel = SKILL_LEVEL[skill.slug] ? levelById(SKILL_LEVEL[skill.slug]) : null;
+            const LevelIcon = skillLevel?.icon;
             return (
               <button
                 key={skill.slug}
                 onClick={() => setSelected(skill)}
                 className="group flex h-full flex-col rounded-xl border border-border/70 bg-card p-4 text-left transition hover:border-primary/50 hover:shadow-md"
               >
-                <div className="mb-2 flex items-center gap-2">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/12 text-primary">
                     <Icon className="h-3.5 w-3.5" />
                   </span>
                   <Badge variant="outline" className="text-[10px] font-medium">
                     {CATEGORY_META[skill.category]?.label}
                   </Badge>
+                  {skillLevel && LevelIcon && (
+                    <span className={cn('ml-auto flex items-center gap-1 text-[10px] font-semibold', skillLevel.color)}>
+                      <LevelIcon className="h-3 w-3" />
+                      {skillLevel.short}
+                    </span>
+                  )}
                 </div>
                 <div className="text-sm font-semibold leading-snug">{skill.name}</div>
                 <p className="mt-1.5 line-clamp-3 flex-1 text-xs leading-relaxed text-muted-foreground">
@@ -144,6 +191,15 @@ export function SkillsLibrary() {
                 <div className="mb-1 flex flex-wrap items-center gap-2">
                   <Badge variant="outline" className="text-[10px]">{CATEGORY_META[selected.category]?.label}</Badge>
                   <Badge variant="outline" className="font-mono text-[10px]">{selected.slug}</Badge>
+                  {SKILL_LEVEL[selected.slug] && (() => {
+                    const lv = levelById(SKILL_LEVEL[selected.slug]);
+                    const LIcon = lv.icon;
+                    return (
+                      <span className={cn('flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold', lv.color)}>
+                        <LIcon className="h-3 w-3" /> {lv.name}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <DialogTitle className="text-xl">{selected.name}</DialogTitle>
                 <DialogDescription className="text-sm">{selected.blurb}</DialogDescription>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { buildCoachPrompt, buildInterviewerScenario, type ChatMode } from '@/lib/coach-prompt';
+import { buildCoachPrompt, buildInterviewerScenario, buildLevelCalibration, type ChatMode } from '@/lib/coach-prompt';
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
 import { callLLMForStudent } from '@/lib/provider-runtime';
@@ -55,12 +55,24 @@ export async function POST(req: NextRequest) {
     });
 
     // ---- build LLM messages ----
+    // level-aware coaching: derive the student's career level from lesson progress
+    const levelBlock = await db.lessonProgress
+      .findMany({ where: { studentId: student.id } })
+      .then(rows => {
+        const map: Record<string, boolean> = {};
+        rows.forEach(r => {
+          map[r.itemId] = r.completed;
+        });
+        return buildLevelCalibration(map);
+      })
+      .catch(() => '');
+
     const systemPrompt =
       mode === 'interviewer'
-        ? buildCoachPrompt('interviewer') + '\n\n' + buildInterviewerScenario(body.scenario?.domain, body.scenario?.role, body.scenario?.difficulty)
+        ? buildCoachPrompt('interviewer', undefined, levelBlock) + '\n\n' + buildInterviewerScenario(body.scenario?.domain, body.scenario?.role, body.scenario?.difficulty)
         : mode === 'feedback'
-          ? buildCoachPrompt('feedback')
-          : buildCoachPrompt(mode, body.skillSlug || conversation.skillSlug);
+          ? buildCoachPrompt('feedback', undefined, levelBlock)
+          : buildCoachPrompt(mode, body.skillSlug || conversation.skillSlug, levelBlock);
 
     const msgCount = await db.message.count({ where: { conversationId: conversation.id } });
     const history = await db.message.findMany({

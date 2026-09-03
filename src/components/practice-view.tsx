@@ -5,6 +5,7 @@ import { BA_SKILLS, CATEGORY_META } from '@/data/skills-data';
 import { BA_CASES } from '@/data/cases-data';
 import { useAppStore } from '@/lib/store';
 import { apiFetch, readJson } from '@/lib/client-api';
+import { caseLevel, levelById } from '@/lib/levels';
 import { Markdown } from '@/components/markdown';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -189,14 +190,14 @@ function QuizTab() {
             <SkillScopeSelect value={scope} onChange={setScope} />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Difficulty</label>
+            <label className="text-xs font-medium text-muted-foreground">Level — difficulty</label>
             <Select value={difficulty} onValueChange={setDifficulty}>
-              <SelectTrigger className="w-full sm:w-40"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="easy">Easy — recall</SelectItem>
-                <SelectItem value="medium">Medium — apply</SelectItem>
-                <SelectItem value="hard">Hard — judge</SelectItem>
-                <SelectItem value="mixed">Mixed</SelectItem>
+                <SelectItem value="easy">Junior — recall</SelectItem>
+                <SelectItem value="medium">Middle — apply</SelectItem>
+                <SelectItem value="hard">Senior — judge</SelectItem>
+                <SelectItem value="mixed">Mixed levels</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -206,7 +207,8 @@ function QuizTab() {
           </Button>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          Five CBAP-style multiple-choice questions written fresh by your coach every time.
+          Five CBAP-style multiple-choice questions written fresh by your coach every time. Junior quizzes test recall,
+          Middle tests application, Senior tests judgement — matching the career levels of the programme.
         </p>
       </div>
 
@@ -463,9 +465,9 @@ function InterviewTab() {
             <Select value={difficulty} onValueChange={setDifficulty}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="easy">Friendly — cooperative but vague</SelectItem>
-                <SelectItem value="medium">Busy — cooperative, scattered</SelectItem>
-                <SelectItem value="hard">Guarded — sceptical, defensive</SelectItem>
+                <SelectItem value="easy">Junior · Friendly — cooperative but vague</SelectItem>
+                <SelectItem value="medium">Middle · Busy — cooperative, scattered</SelectItem>
+                <SelectItem value="hard">Senior · Guarded — sceptical, defensive</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -505,6 +507,16 @@ function InterviewTab() {
 
 /* ---------------- case method ---------------- */
 
+function CaseLevelBadge({ difficulty }: { difficulty: string }) {
+  const lv = levelById(caseLevel(difficulty));
+  const LIcon = lv.icon;
+  return (
+    <span className={cn('flex items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5 text-[10px] font-semibold', lv.color)}>
+      <LIcon className="h-3 w-3" /> {lv.short} · {difficulty}
+    </span>
+  );
+}
+
 function CasesTab() {
   const store = useAppStore();
   const [openCase, setOpenCase] = useState<(typeof BA_CASES)[number] | null>(null);
@@ -527,7 +539,8 @@ function CasesTab() {
         <p className="text-sm text-muted-foreground">
           Inspired by the Harvard Business School classroom: no right answers on a slide — you defend a
           position, your coach challenges your reasoning Socratically, and technique emerges from the case.
-          Six original cases across sectors, each mapped to the skills it exercises.
+          Six original cases across sectors — two per career level (Junior · Foundational, Middle · Intermediate,
+          Senior · Advanced), each mapped to the skills it exercises.
         </p>
       </div>
 
@@ -536,7 +549,7 @@ function CasesTab() {
           <div key={c.id} className="flex flex-col rounded-xl border border-border/70 bg-card p-5">
             <div className="mb-2 flex items-center justify-between">
               <span className="font-mono text-xs font-semibold text-[#a51c30]">{c.code}</span>
-              <Badge variant="outline" className="text-[10px]">{c.difficulty}</Badge>
+              <CaseLevelBadge difficulty={c.difficulty} />
             </div>
             <h3 className="font-display text-base font-semibold leading-snug">{c.title}</h3>
             <p className="mt-1 text-xs text-muted-foreground">{c.sector}</p>
@@ -560,7 +573,7 @@ function CasesTab() {
               <DialogHeader>
                 <div className="mb-1 flex items-center gap-2">
                   <span className="font-mono text-xs font-semibold text-[#a51c30]">{openCase.code}</span>
-                  <Badge variant="outline" className="text-[10px]">{openCase.difficulty}</Badge>
+                  <CaseLevelBadge difficulty={openCase.difficulty} />
                 </div>
                 <DialogTitle className="font-display text-xl">{openCase.title}</DialogTitle>
                 <DialogDescription>

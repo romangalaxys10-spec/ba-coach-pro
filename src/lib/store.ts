@@ -80,6 +80,10 @@ interface AppState {
   autoSpeak: boolean;
   ttsVoice: string;
 
+  // lesson progress (skills, track lessons, level unlock overrides)
+  progressMap: Record<string, boolean>;
+  progressLoaded: boolean;
+
   // auth actions
   bootstrap: () => Promise<void>;
   register: (name: string) => Promise<{ ok: boolean; error?: string }>;
@@ -109,6 +113,9 @@ interface AppState {
   setTheme: (t: 'light' | 'dark') => void;
   setAutoSpeak: (v: boolean) => void;
   setTtsVoice: (v: string) => void;
+
+  loadProgress: () => Promise<void>;
+  toggleLesson: (itemId: string, completed: boolean) => Promise<void>;
 
   loadConversations: () => Promise<void>;
   openConversation: (id: string) => Promise<void>;
@@ -147,6 +154,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   autoSpeak: false,
   ttsVoice: 'jam',
 
+  progressMap: {},
+  progressLoaded: false,
+
   bootstrap: async () => {
     // theme / prefs
     const theme = (localStorage.getItem('ba-theme') as 'light' | 'dark') || 'dark';
@@ -167,6 +177,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const data = await readJson<{ student?: StudentInfo; stats?: StudentStats }>(res);
         set({ student: data.student, stats: data.stats, authReady: true });
         void get().loadConversations();
+        void get().loadProgress();
       } else {
         clearStoredToken();
         set({ authReady: true });
@@ -189,6 +200,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       setStoredToken(data.token);
       set({ student: data.student, justRegistered: true, freshToken: data.token, stats: { conversations: 0, lessonsCompleted: 0, quizAttempts: 0, flashcards: 0 } });
       void get().loadConversations();
+      void get().loadProgress();
       return { ok: true };
     } catch {
       return { ok: false, error: 'Network error — please try again.' };
@@ -208,7 +220,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       setStoredToken(data.token);
       set({ student: data.student, justRegistered: false, freshToken: '' });
       // fetch profile with stats
-      void get().refreshStudent().then(() => get().loadConversations());
+      void get().refreshStudent().then(() => {
+        void get().loadConversations();
+        void get().loadProgress();
+      });
       return { ok: true };
     } catch {
       return { ok: false, error: 'Network error — please try again.' };
@@ -227,6 +242,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       view: 'chat',
       justRegistered: false,
       freshToken: '',
+      progressMap: {},
+      progressLoaded: false,
     });
   },
 
@@ -320,6 +337,34 @@ export const useAppStore = create<AppState>((set, get) => ({
   setTtsVoice: v => {
     set({ ttsVoice: v });
     localStorage.setItem('ba-ttsvoice', v);
+  },
+
+  loadProgress: async () => {
+    try {
+      const res = await apiFetch('/api/progress');
+      const data = await readJson<{ progress?: { itemId: string; completed: boolean }[] }>(res);
+      const map: Record<string, boolean> = {};
+      (data.progress || []).forEach((p: { itemId: string; completed: boolean }) => {
+        map[p.itemId] = p.completed;
+      });
+      set({ progressMap: map, progressLoaded: true });
+    } catch {
+      set({ progressLoaded: true });
+    }
+  },
+
+  toggleLesson: async (itemId, completed) => {
+    set(s => ({ progressMap: { ...s.progressMap, [itemId]: completed } }));
+    try {
+      await apiFetch('/api/progress', {
+        method: 'POST',
+        body: JSON.stringify({ itemId, completed }),
+      });
+      // keep the sidebar stats honest
+      void get().refreshStudent();
+    } catch {
+      /* optimistic; next load will reconcile */
+    }
   },
 
   loadConversations: async () => {

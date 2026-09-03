@@ -1,4 +1,5 @@
 import { getSkill, BA_SKILLS } from '@/data/skills-data';
+import { computeCareerProgress, levelById } from '@/lib/levels';
 
 export type ChatMode = 'coach' | 'skill' | 'interviewer' | 'feedback';
 
@@ -15,7 +16,32 @@ Your teaching principles:
 - Never invent fake statistics or sources. Flag missing evidence as what would need to be gathered.
 - End substantive answers with a clear "Next step" suggestion when appropriate.`;
 
-export function buildCoachPrompt(mode: ChatMode, skillSlug?: string | null): string {
+/**
+ * Level-aware calibration block, appended to the system prompt in coach/skill/feedback
+ * modes so Ada teaches at the depth of the student's current career level.
+ */
+export function buildLevelCalibration(completed: Record<string, boolean>): string {
+  if (!completed || Object.keys(completed).length === 0) return '';
+  const career = computeCareerProgress(completed);
+  const lp = career.levels.find(l => l.id === career.currentLevelId);
+  if (!lp) return '';
+  const lv = levelById(lp.id);
+  const depth =
+    lp.id === 'junior'
+      ? 'scaffold heavily: define every term, go in small steps, always show a worked example, check understanding often, be encouraging'
+      : lp.id === 'middle'
+        ? 'assume the craft basics; focus on rigour, trade-offs, stakeholder handling and production-quality deliverables'
+        : 'go straight to nuance: strategy, governance, benefits realisation and organisational politics; challenge their reasoning like a peer';
+  return `
+
+## STUDENT LEVEL CALIBRATION
+The student is enrolled in the three-level BA programme (Junior → Middle → Senior) and is currently at **${lv.name} (${lv.tagline}) — ${lp.pct}% through that level**.
+- Calibrate to that level: ${depth}.
+- When relevant, suggest the next lesson from their level's tracks (currently: ${lv.tracks.join(', ')}).
+- If they ask for material far above their level, still teach it — but flag the prerequisites they skip.`;
+}
+
+export function buildCoachPrompt(mode: ChatMode, skillSlug?: string | null, levelBlock?: string): string {
   if (mode === 'skill' && skillSlug) {
     const skill = getSkill(skillSlug);
     if (skill) {
@@ -35,7 +61,7 @@ How to behave in this mode:
 - Follow the Procedure steps in order; at each step show what to produce and ask for their input.
 - Produce artefacts in structured Markdown (tables, numbered lists) that the learner could paste into a real BA document.
 - Apply the Guardrails: separate facts from inferences, flag weak assumptions, keep asking for evidence.
-- Finish when the Completion criteria are met, and summarise the outputs produced.`;
+- Finish when the Completion criteria are met, and summarise the outputs produced.${levelBlock || ''}`;
     }
   }
 
@@ -56,7 +82,7 @@ RULES OF THE SIMULATION:
 7. If the learner breaks the fourth wall with a question about the simulation itself, answer briefly in italics as a facilitator note, then return to character.
 8. If the learner says "END_SIM" (or asks to end and get feedback), drop character and deliver the debrief (see below).
 
-DEBRIEF FORMAT (after END_SIM): switch back to coach mode and evaluate the learner's elicitation performance across: question quality (open vs closed, probing, funnel structure), rapport and stakeholder handling, coverage (process, pain points, rules, edge cases, success measures), notes on what they missed, 3 specific improved questions they could have asked, and an overall score out of 10 with justification.`;
+DEBRIEF FORMAT (after END_SIM): switch back to coach mode and evaluate the learner's elicitation performance across: question quality (open vs closed, probing, funnel structure), rapport and stakeholder handling, coverage (process, pain points, rules, edge cases, success measures), notes on what they missed, 3 specific improved questions they could have asked, and an overall score out of 10 with justification.${levelBlock || ''}`;
   }
 
   if (mode === 'feedback') {
@@ -90,7 +116,7 @@ Suggested learning paths you may recommend:
 - Beginner: business-problem-framing → stakeholder-register → interview-design → proto-requirements-normalizer → requirements-quality-check
 - Requirements deep-dive: requirements-elicitation → requirements-interrogator → acceptance-criteria-writer → edge-case-elicitor → moscow-prioritisation → requirements-traceability-starter
 - Process improvement: as-is-process-investigator → process-model-spec → to-be-process-designer → business-rule-extractor → benefit-hypothesis-writer
-- Strategy: pestle-analysis → porters-five-forces → swot-prioritisation → value-proposition-analysis → strategy-analysis`;
+- Strategy: pestle-analysis → porters-five-forces → swot-prioritisation → value-proposition-analysis → strategy-analysis${levelBlock || ''}`;
 }
 
 export function buildInterviewerScenario(domain?: string, role?: string, difficulty?: string): string {

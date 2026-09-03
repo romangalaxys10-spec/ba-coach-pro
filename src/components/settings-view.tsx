@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import { apiFetch, readJson } from '@/lib/client-api';
 import { AI_PROVIDER_PRESETS, getPreset } from '@/lib/ai-providers';
+import { BA_LEVELS, computeCareerProgress, levelById } from '@/lib/levels';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
@@ -187,6 +189,8 @@ export function SettingsView() {
             ))}
           </div>
 
+          <CareerLevelRow />
+
           <StudentTokenRow />
         </section>
 
@@ -327,6 +331,55 @@ export function SettingsView() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** career level snapshot — mirrors the level journey from Learning Tracks */
+function CareerLevelRow() {
+  const progressMap = useAppStore(s => s.progressMap);
+  const setView = useAppStore(s => s.setView);
+  const career = computeCareerProgress(progressMap);
+  const current = levelById(career.currentLevelId);
+  const CurrentIcon = current.icon;
+
+  return (
+    <div className="mt-5 rounded-xl border border-border/60 bg-muted/30 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <CurrentIcon className={cn('h-5 w-5', current.color)} />
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Career level</div>
+            <div className="text-sm font-semibold">
+              {current.name} · {current.tagline}
+              <span className={cn('ml-2', current.color)}>{career.levels.find(l => l.id === current.id)?.pct}%</span>
+            </div>
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setView('learn')}>
+          Continue the programme
+        </Button>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {BA_LEVELS.map(lv => {
+          const lp = career.levels.find(l => l.id === lv.id);
+          const LIcon = lv.icon;
+          const isCurrent = lv.id === current.id;
+          return (
+            <div key={lv.id} className={cn('rounded-lg border p-2.5', isCurrent ? 'border-primary/40 bg-primary/5' : 'border-border/50')}>
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold">
+                <LIcon className={cn('h-3 w-3', lv.color)} />
+                <span className={isCurrent ? lv.color : 'text-muted-foreground'}>{lv.short}</span>
+                <span className="ml-auto tabular-nums text-muted-foreground">{lp?.pct ?? 0}%</span>
+              </div>
+              <Progress value={lp?.pct ?? 0} className="mt-1.5 h-1" />
+              <div className="mt-1 text-[10px] text-muted-foreground">
+                {lp?.status === 'locked' ? 'Locked' : lp?.status === 'complete' ? 'Mastered' : `${lp?.done ?? 0}/${lp?.total ?? 0} lessons`}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
