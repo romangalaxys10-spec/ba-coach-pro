@@ -1,13 +1,10 @@
 import { PrismaClient } from '@prisma/client';
+import { ghDbEnabled, ghModels } from '@/lib/ghdb';
 
 /**
- * Prisma singleton with automatic schema bootstrap.
- *
- * - Locally: `bun run db:push` creates db/custom.db; ensureSchema() is a no-op
- *   (all statements are CREATE TABLE IF NOT EXISTS).
- * - On ephemeral hosts (Vercel demo): DATABASE_URL points at /tmp, which is
- *   wiped between builds — the bootstrap below transparently recreates the
- *   schema on cold start so the demo self-heals.
+ * Prisma singleton (local/self-hosted) with automatic schema bootstrap,
+ * OR a GitHub-backed durable adapter when DEMO_DB_* env vars are present
+ * (used on ephemeral hosts like the Vercel demo).
  *
  * `db` is a thin proxy that awaits schema readiness before delegating to
  * Prisma, so route handlers need no extra awaits.
@@ -102,7 +99,7 @@ function wrapModelDelegate(delegate: object, ready: Promise<void>): object {
 
 const prisma = globalForPrisma.prisma ?? new PrismaClient();
 
-export const db = new Proxy(prisma, {
+const prismaProxy = new Proxy(prisma, {
   get(target, prop, recv) {
     const value = Reflect.get(target, prop, recv);
     if (typeof value === 'function') {
@@ -115,6 +112,10 @@ export const db = new Proxy(prisma, {
     }
     return value;
   },
-}) as PrismaClient;
+});
+
+/** GitHub-backed durable adapter (public demo) or Prisma proxy (local). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const db: PrismaClient = (ghDbEnabled ? ghModels : prismaProxy) as any as PrismaClient;
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
