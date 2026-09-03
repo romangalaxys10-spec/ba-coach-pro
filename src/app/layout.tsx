@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
@@ -14,25 +14,42 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Z.ai Code Scaffold - AI-Powered Development",
-  description: "Modern Next.js scaffold optimized for AI-powered development with Z.ai. Built with TypeScript, Tailwind CSS, and shadcn/ui.",
-  keywords: ["Z.ai", "Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui", "AI development", "React"],
-  authors: [{ name: "Z.ai Team" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
+  title: "BA Coach Pro — Your Personal Business Analyst Coach",
+  description:
+    "A full-scale AI business analyst coach and educator: 53 coached BA techniques, guided learning tracks, exam-style quizzes, flashcards, a live stakeholder interview simulator with voice, and Harvard-style case discussions. Built with Z.ai GLM.",
+  keywords: [
+    "business analyst",
+    "BA coach",
+    "business analysis",
+    "AI tutor",
+    "requirements engineering",
+    "CBAP",
+    "PMI-PBA",
+    "elicitation",
+    "Z.ai",
+    "GLM",
+  ],
+  authors: [{ name: "Roman — rommark.dev" }],
+  metadataBase: new URL("https://ba-coach-pro.vercel.app"),
   openGraph: {
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-    url: "https://chat.z.ai",
-    siteName: "Z.ai",
+    title: "BA Coach Pro — Learn Business Analysis with an AI Coach",
+    description:
+      "53 BA techniques coached step-by-step, voice interviews, case-method classroom, quizzes and flashcards.",
+    siteName: "BA Coach Pro",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
+    title: "BA Coach Pro",
+    description: "Your personal AI Business Analyst coach — study, practise, deliver.",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#1a2026" },
+    { media: "(prefers-color-scheme: light)", color: "#fafcfc" },
+  ],
 };
 
 export default function RootLayout({
@@ -41,7 +58,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="dark" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
