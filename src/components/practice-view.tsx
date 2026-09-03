@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { BA_SKILLS, CATEGORY_META } from '@/data/skills-data';
 import { BA_CASES } from '@/data/cases-data';
 import { useAppStore } from '@/lib/store';
-import { apiFetch } from '@/lib/client-api';
+import { apiFetch, readJson } from '@/lib/client-api';
 import { Markdown } from '@/components/markdown';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -154,9 +154,9 @@ function QuizTab() {
           count: 5,
         }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; questions?: QuizQuestion[] }>(res);
       if (!res.ok || data.error) throw new Error(data.error);
-      setQuestions(data.questions);
+      setQuestions(data.questions || []);
     } catch {
       setQuestions([]);
     } finally {
@@ -327,9 +327,9 @@ function FlashcardsTab() {
           count: 8,
         }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; cards?: Flashcard[] }>(res);
       if (!res.ok || data.error) throw new Error(data.error);
-      setCards(data.cards);
+      setCards(data.cards || []);
     } catch {
       setCards([]);
     } finally {

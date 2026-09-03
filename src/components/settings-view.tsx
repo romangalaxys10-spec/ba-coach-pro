@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAppStore } from '@/lib/store';
-import { apiFetch } from '@/lib/client-api';
+import { apiFetch, readJson } from '@/lib/client-api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -69,7 +69,7 @@ export function SettingsView() {
         method: 'POST',
         body: JSON.stringify({ action: 'pair', patToken: pat.trim(), repoName: repoName.trim() }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; repoCreated?: boolean; owner?: string; repo?: string; sync?: { ok?: boolean } }>(res);
       if (!res.ok) throw new Error(data.error || 'Pairing failed');
       setPat('');
       await refreshStudent();
@@ -89,7 +89,7 @@ export function SettingsView() {
         method: 'POST',
         body: JSON.stringify({ action: 'sync' }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error || 'Sync failed');
       await refreshStudent();
       setMsg({ kind: 'ok', text: 'Full backup synced to your GitHub repo.' });
@@ -108,7 +108,7 @@ export function SettingsView() {
         method: 'POST',
         body: JSON.stringify({ action: 'restore' }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; restored?: { conversations?: number; lessons?: number; quizzes?: number } }>(res);
       if (!res.ok) throw new Error(data.error || 'Restore failed');
       await refreshStudent();
       setMsg({

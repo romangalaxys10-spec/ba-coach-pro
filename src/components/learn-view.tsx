@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getSkill } from '@/data/skills-data';
 import { useAppStore } from '@/lib/store';
-import { apiFetch } from '@/lib/client-api';
+import { apiFetch, readJson } from '@/lib/client-api';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
@@ -105,7 +105,7 @@ export function LearnView() {
 
   useEffect(() => {
     void apiFetch('/api/progress')
-      .then(r => r.json())
+      .then(r => readJson<{ progress?: { itemId: string; completed: boolean }[] }>(r))
       .then(data => {
         const map: Record<string, boolean> = {};
         (data.progress || []).forEach((p: { itemId: string; completed: boolean }) => {

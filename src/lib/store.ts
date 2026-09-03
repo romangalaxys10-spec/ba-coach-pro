@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { v4 as uuid } from 'uuid';
-import { apiFetch, getStoredToken, setStoredToken, clearStoredToken } from '@/lib/client-api';
+import { apiFetch, getStoredToken, setStoredToken, clearStoredToken, readJson } from '@/lib/client-api';
 
 export type View = 'chat' | 'skills' | 'learn' | 'practice' | 'templates' | 'settings';
 export type ChatMode = 'coach' | 'skill' | 'interviewer';
@@ -137,7 +137,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const res = await apiFetch('/api/auth');
       if (res.ok) {
-        const data = await res.json();
+        const data = await readJson<{ student?: StudentInfo; stats?: StudentStats }>(res);
         set({ student: data.student, stats: data.stats, authReady: true });
         void get().loadConversations();
       } else {
@@ -156,8 +156,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'register', name }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; token?: string; student?: StudentInfo }>(res);
       if (!res.ok) return { ok: false, error: data.error || 'Registration failed' };
+      if (!data.token) return { ok: false, error: 'Registration failed' };
       setStoredToken(data.token);
       set({ student: data.student, justRegistered: true, freshToken: data.token, stats: { conversations: 0, lessonsCompleted: 0, quizAttempts: 0, flashcards: 0 } });
       void get().loadConversations();
@@ -174,8 +175,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'login', token }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; token?: string; student?: StudentInfo }>(res);
       if (!res.ok) return { ok: false, error: data.error || 'Login failed' };
+      if (!data.token) return { ok: false, error: 'Login failed' };
       setStoredToken(data.token);
       set({ student: data.student, justRegistered: false, freshToken: '' });
       // fetch profile with stats
@@ -207,7 +209,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const res = await apiFetch('/api/auth');
       if (res.ok) {
-        const data = await res.json();
+        const data = await readJson<{ student?: StudentInfo; stats?: StudentStats }>(res);
         set({ student: data.student, stats: data.stats });
       }
     } catch {
@@ -236,7 +238,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadConversations: async () => {
     try {
       const res = await apiFetch('/api/conversations');
-      const data = await res.json();
+      const data = await readJson<{ conversations?: ConversationMeta[] }>(res);
       set({ conversations: data.conversations || [], conversationsLoaded: true });
     } catch {
       set({ conversationsLoaded: true });
@@ -247,7 +249,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ activeConversationId: id, view: 'chat', sidebarOpen: false, messages: [], thinking: false });
     try {
       const res = await apiFetch(`/api/conversations/${id}`);
-      const data = await res.json();
+      const data = await readJson<{ conversation?: { mode?: string; skillSlug?: string | null; messages: { id: string; role: string; content: string }[] } }>(res);
       if (data.conversation) {
         set({
           messages: data.conversation.messages.map((m: { id: string; role: string; content: string }) => ({
@@ -338,14 +340,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           scenario,
         }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; reply?: string; conversationId?: string }>(res);
       if (!res.ok || data.error) throw new Error(data.error || 'Coach request failed');
 
-      const reply: ChatMessage = { id: uuid(), role: 'assistant', content: data.reply };
+      const reply: ChatMessage = { id: uuid(), role: 'assistant', content: data.reply || '' };
       set(s => ({
         messages: [...s.messages, reply],
         thinking: false,
-        activeConversationId: data.conversationId,
+        activeConversationId: data.conversationId || s.activeConversationId,
       }));
 
       // refresh conversation list (title may have changed) + stats snapshot

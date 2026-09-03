@@ -1,5 +1,7 @@
 'use client';
 
+import { readJson } from '@/lib/client-api';
+
 /** Client-side voice helpers: microphone recording → WAV base64, and TTS playback. */
 
 export interface RecordingSession {
@@ -125,7 +127,7 @@ export async function transcribeAudio(base64Wav: string): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ audio: base64Wav }),
   });
-  const data = await res.json();
+  const data = await readJson<{ error?: string; text?: string }>(res);
   if (!res.ok || data.error) throw new Error(data.error || 'Transcription failed');
   return (data.text || '').trim();
 }
@@ -147,7 +149,7 @@ export function speakText(text: string, voice = 'jam'): TtsHandle {
       body: JSON.stringify({ text, voice }),
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = await readJson<{ error?: string }>(res).catch((): { error?: string } => ({}));
       throw new Error(data.error || 'Speech generation failed');
     }
     if (stopped) return;

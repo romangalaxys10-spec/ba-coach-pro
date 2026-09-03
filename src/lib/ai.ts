@@ -24,13 +24,14 @@ export interface ChatMsg {
   content: string;
 }
 
-const TUNNEL_URL = (process.env.AI_TUNNEL_URL || '').replace(/\/$/, '');
-const TUNNEL_KEY = process.env.AI_TUNNEL_KEY || '';
+const envTunnelUrl = () => (process.env.AI_TUNNEL_URL || '').replace(/\/$/, '');
+const envTunnelKey = () => process.env.AI_TUNNEL_KEY || '';
 const ENV_KEY = process.env.ZAI_API_KEY || '';
 const ENV_BASE = (process.env.ZAI_BASE_URL || 'https://api.z.ai/api/paas/v4').replace(/\/$/, '');
 
-export const aiMode: 'tunnel' | 'env-key' | 'sdk' =
-  TUNNEL_URL ? 'tunnel' : ENV_KEY ? 'env-key' : 'sdk';
+export function aiMode(): 'tunnel' | 'env-key' | 'sdk' {
+  return envTunnelUrl() ? 'tunnel' : ENV_KEY ? 'env-key' : 'sdk';
+}
 
 export const NOT_CONFIGURED_MSG =
   '🤖 **AI coaching is not configured on this deployment.**\n\n' +
@@ -44,11 +45,13 @@ export const NOT_CONFIGURED_MSG =
 /* ------------------------------------------------------------------ */
 
 async function tunnelCall<T>(payload: Record<string, unknown>, timeoutMs: number): Promise<T> {
+  const base = envTunnelUrl();
+  const key = envTunnelKey();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (TUNNEL_KEY) headers['x-tunnel-key'] = TUNNEL_KEY;
+  if (key) headers['x-tunnel-key'] = key;
   let res: Response;
   try {
-    res = await fetch(`${TUNNEL_URL}/api/tunnel`, {
+    res = await fetch(`${base}/api/tunnel`, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
@@ -56,7 +59,7 @@ async function tunnelCall<T>(payload: Record<string, unknown>, timeoutMs: number
     });
   } catch (e) {
     throw new Error(
-      `AI tunnel unreachable at ${TUNNEL_URL}/api/tunnel — is the sandbox instance running? (${
+      `AI tunnel unreachable at ${base}/api/tunnel — is the sandbox instance running? (${
         e instanceof Error ? e.message : String(e)
       })`
     );
@@ -139,7 +142,7 @@ export async function callLLMDirect(messages: ChatMsg[], retries = 2): Promise<s
 
 /** Tunnel-aware LLM entry point used by all feature routes. */
 export async function callLLM(messages: ChatMsg[], retries = 2): Promise<string> {
-  if (TUNNEL_URL) {
+  if (envTunnelUrl()) {
     let lastErr: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
@@ -182,7 +185,7 @@ async function ttsViaSdk(input: string, voice: string, speed: number): Promise<B
  * Tunnel mode forwards the chunk to the sandbox; otherwise the local SDK is used.
  */
 export async function callTTSChunk(input: string, voice: string, speed: number): Promise<Buffer> {
-  if (TUNNEL_URL) {
+  if (envTunnelUrl()) {
     const data = await tunnelCall<{ audio?: string }>(
       { kind: 'tts', input, voice, speed },
       120_000
@@ -206,7 +209,7 @@ async function asrViaSdk(fileBase64: string): Promise<string> {
 
 /** Transcribe a base64 WAV. Tunnel mode forwards to the sandbox. */
 export async function callASR(audioBase64: string): Promise<string> {
-  if (TUNNEL_URL) {
+  if (envTunnelUrl()) {
     const data = await tunnelCall<{ text?: string }>(
       { kind: 'asr', audio: audioBase64 },
       90_000
