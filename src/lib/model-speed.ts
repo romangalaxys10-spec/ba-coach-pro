@@ -29,6 +29,22 @@ const SPEED_OVERRIDES: Array<{ match: RegExp; tier: number; label: string }> = [
   { match: /nemotron.*lightning/i, tier: 1, label: 'Lightning MoE — NVIDIA speed-optimised' },
   { match: /nemotron-nano/i, tier: 1, label: 'Nano family — fastest Nemotron line' },
   { match: /minitron/i, tier: 2, label: 'Minitron — pruned for speed' },
+  { match: /glm-4\.5-flash|glm-4-flash|glm-flash/i, tier: 1.5, label: 'GLM flash tier — fastest GLM line' },
+  { match: /glm-4\.5-air|glm-4\.6-air|glm-4\.1-air|glm-air/i, tier: 4, label: 'GLM air — lightweight mid-tier' },
+  { match: /gemini[-\d.]*flash/i, tier: 2, label: 'Gemini flash — fast multimodal line' },
+  { match: /gemini.*pro/i, tier: 5, label: 'Gemini pro — quality tier' },
+  { match: /claude.*haiku|haiku/i, tier: 3, label: 'Haiku — fastest Claude line' },
+  { match: /claude.*sonnet|sonnet/i, tier: 5, label: 'Sonnet — balanced Claude tier' },
+  { match: /claude.*opus|opus/i, tier: 7, label: 'Opus — heavyweight Claude tier' },
+  { match: /gpt-4o-mini|gpt-4\.1-mini|gpt-5-mini|o4-mini/i, tier: 2.5, label: 'Mini GPT tier — fast' },
+  { match: /(^|\/)o[134](-|$|_)/i, tier: 6, label: 'Reasoning model — slow first token' },
+  { match: /gpt-4o|gpt-4\.1|gpt-5/i, tier: 5, label: 'Full-size GPT — slower than mini' },
+  { match: /code-supernova/i, tier: 3, label: 'Supernova — fast coding model' },
+  { match: /grok-code|grok-mini|grok-fast/i, tier: 3, label: 'Grok fast/code tier' },
+  { match: /deepseek-r1|deepseek-reasoner|reasoning/i, tier: 6, label: 'Reasoning model — thinking tokens slow responses' },
+  { match: /deepseek-chat|deepseek-v3/i, tier: 4.5, label: 'DeepSeek chat — mid-speed MoE' },
+  { match: /qwen-(turbo|flash)/i, tier: 2, label: 'Qwen turbo/flash — fast line' },
+  { match: /qwen-max/i, tier: 5.5, label: 'Qwen max — quality tier' },
   { match: /kimi-k/i, tier: 8, label: 'Trillion-param MoE — heavy' },
   { match: /minimax-m\d/i, tier: 8, label: 'Large MoE — heavy' },
   { match: /nemotron-3-ultra|ultra-253b/i, tier: 8, label: 'Ultra 550B — quality over speed' },
@@ -106,8 +122,8 @@ export function estimateSpeed(modelId: string): SpeedEstimate {
   }
 
   // keyword nudges (half a tier each)
-  if (/nano|flash|lightning|turbo|mini\b/.test(s)) tier -= 0.5;
-  if (/ultra|large|pro\b|plus\b/.test(s)) tier += 0.5;
+  if (/nano|flash|lightning|turbo|mini\b|lite\b|small\b|instant\b|air\b|swift|express|rapid/.test(s)) tier -= 0.5;
+  if (/ultra|large|pro\b|plus\b|max\b|opus\b|giant|huge/.test(s)) tier += 0.5;
   if (/-it\b|instruct|chat/.test(s)) tier -= 0.1; // tuned chat variants respond cleanly
 
   return {
@@ -321,6 +337,8 @@ export interface FastestResult {
   benchmarked: number;
   /** true when no key was available — tiers are estimates, not measurements */
   estimated: boolean;
+  /** 'live' = provider's /models list; 'fallback' = built-in preset suggestions */
+  listSource?: 'live' | 'fallback';
   suggested: string | null;
   results: FastModelRow[];
   errors: Array<{ model: string; error: string }>;
@@ -372,8 +390,10 @@ export async function benchModelList(input: {
   apiKey: string;
   refresh: boolean;
   limit?: number;
+  /** built-in suggestions used when the endpoint hides its model list */
+  fallbackModels?: string[];
 }): Promise<FastestResult> {
-  const { providerId, providerName, baseUrl, apiKey, refresh } = input;
+  const { providerId, providerName, baseUrl, apiKey, refresh, fallbackModels = [] } = input;
 
   const key = cacheKey(baseUrl, apiKey);
   if (!refresh) {
@@ -390,9 +410,23 @@ export async function benchModelList(input: {
     chatCandidates: 0,
     errors: [],
     fetchedAt: new Date().toISOString(),
+    listSource: 'live',
   };
 
-  if (!list.ok) {
+  // Endpoints that hide /models (OpenAdapter & Z.ai without a key, custom
+  // servers without a list) fall back to the preset's built-in suggestions —
+  // with a key those are still benchmarked for real tok/s.
+  let fallbackNotice: string | null = null;
+  if (!list.ids.length && fallbackModels.length) {
+    list.ids = [...fallbackModels];
+    base.totalModels = fallbackModels.length;
+    base.listSource = 'fallback';
+    fallbackNotice = apiKey
+      ? `Live model list unavailable from this endpoint — benchmarked the built-in suggestions instead.`
+      : `This provider hides its model list without a key — showing built-in suggestions (estimated). Paste your key and press "Measure real speed".`;
+  }
+
+  if (!list.ids.length && !fallbackModels.length) {
     return {
       ...base,
       ok: false,
@@ -401,7 +435,9 @@ export async function benchModelList(input: {
       estimated: true,
       suggested: null,
       results: [],
-      message: list.error,
+      message:
+        list.error ||
+        'This endpoint does not expose a model list — type the model id manually, or paste a key and press Test.',
     };
   }
 
@@ -423,6 +459,7 @@ export async function benchModelList(input: {
       suggested: results[0]?.model ?? null,
       results,
       message:
+        fallbackNotice ||
         'Showing estimated speed (parameter counts and model families). Press "Measure real speed" after pasting your key for measured tokens/sec.',
     };
     setCached(key, out);
@@ -466,9 +503,11 @@ export async function benchModelList(input: {
     suggested: results[0]?.model ?? null,
     results,
     errors: failed.slice(0, 12),
-    message: okRows.length
-      ? `Measured ${rows.length} models live — ${okRows.length} responded. Ranked by real tokens/sec.`
-      : 'None of the candidate models responded — check your key/quota, or the endpoint is busy.',
+    message: fallbackNotice
+      ? `${fallbackNotice} ${okRows.length ? `Fastest: ${results[0]?.model}.` : ''}`.trim()
+      : okRows.length
+        ? `Measured ${rows.length} models live — ${okRows.length} responded. Ranked by real tokens/sec.`
+        : 'None of the candidate models responded — check your key/quota, or the endpoint is busy.',
   };
   setCached(key, out);
   return out;

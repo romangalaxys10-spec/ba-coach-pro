@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
     apiKey,
     refresh: Boolean(body.refresh),
     limit: Number(body.limit) || undefined,
+    fallbackModels: preset.models,
   });
 
   return NextResponse.json(result, { status: result.ok ? 200 : result.status ?? 502 });

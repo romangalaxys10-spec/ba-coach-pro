@@ -494,6 +494,11 @@ function AiProviderSection() {
 
   const fetchFastest = async (opts?: { refresh?: boolean; withKey?: boolean }) => {
     if (!preset?.fastModels) return;
+    if (!baseUrl.trim() && !preset.baseUrl) {
+      setFast(null);
+      setFastMsg('Type your endpoint base URL first — then models can be fetched and ranked.');
+      return;
+    }
     setFastLoading(true);
     setFastMsg(null);
     try {
@@ -509,10 +514,10 @@ function AiProviderSection() {
           refresh: opts?.refresh,
         }),
       });
-      const data = await readJson<FastestResult>(res);
+      const data = await readJson<FastestResult & { error?: string }>(res);
       setFast(data);
       if (!data.ok) {
-        setFastMsg(data.message || 'Could not fetch the provider model list.');
+        setFastMsg(data.message || data.error || 'Could not fetch the provider model list.');
       } else if (data.estimated) {
         setFastMsg(data.message || null);
         // auto-suggest the fastest known model while the field is untouched
