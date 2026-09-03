@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { v4 as uuid } from 'uuid';
+import { apiFetch, getStoredToken, setStoredToken, clearStoredToken } from '@/lib/client-api';
 
-export type View = 'chat' | 'skills' | 'learn' | 'practice' | 'templates';
+export type View = 'chat' | 'skills' | 'learn' | 'practice' | 'templates' | 'settings';
 export type ChatMode = 'coach' | 'skill' | 'interviewer';
 
 export interface ChatMessage {
@@ -24,7 +25,35 @@ export interface PendingScenario {
   difficulty?: string;
 }
 
+export interface StudentInfo {
+  id: string;
+  name: string;
+  token?: string;
+  createdAt: string;
+  github: {
+    paired: boolean;
+    owner?: string | null;
+    repo?: string | null;
+    lastSyncAt?: string | null;
+    autoSync: boolean;
+  };
+}
+
+export interface StudentStats {
+  conversations: number;
+  lessonsCompleted: number;
+  quizAttempts: number;
+  flashcards: number;
+}
+
 interface AppState {
+  // auth
+  authReady: boolean;
+  student: StudentInfo | null;
+  stats: StudentStats | null;
+  justRegistered: boolean; // show the "intro card with token" once after registering
+  freshToken: string;
+
   view: View;
   sidebarOpen: boolean;
   theme: 'light' | 'dark';
@@ -39,6 +68,14 @@ interface AppState {
   thinking: boolean;
   autoSpeak: boolean;
   ttsVoice: string;
+
+  // auth actions
+  bootstrap: () => Promise<void>;
+  register: (name: string) => Promise<{ ok: boolean; error?: string }>;
+  login: (token: string) => Promise<{ ok: boolean; error?: string }>;
+  logout: () => void;
+  dismissIntroCard: () => void;
+  refreshStudent: () => Promise<void>;
 
   setView: (v: View) => void;
   toggleSidebar: () => void;
@@ -62,6 +99,12 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
+  authReady: false,
+  student: null,
+  stats: null,
+  justRegistered: false,
+  freshToken: '',
+
   view: 'chat',
   sidebarOpen: false,
   theme: 'dark',
@@ -76,6 +119,101 @@ export const useAppStore = create<AppState>((set, get) => ({
   thinking: false,
   autoSpeak: false,
   ttsVoice: 'jam',
+
+  bootstrap: async () => {
+    // theme / prefs
+    const theme = (localStorage.getItem('ba-theme') as 'light' | 'dark') || 'dark';
+    set({ theme, autoSpeak: localStorage.getItem('ba-autospeak') === '1', ttsVoice: localStorage.getItem('ba-ttsvoice') || 'jam' });
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    // a page load is never "just registered" — avoids re-showing the intro card
+    set({ justRegistered: false, freshToken: '' });
+
+    // session restore
+    const token = getStoredToken();
+    if (!token) {
+      set({ authReady: true });
+      return;
+    }
+    try {
+      const res = await apiFetch('/api/auth');
+      if (res.ok) {
+        const data = await res.json();
+        set({ student: data.student, stats: data.stats, authReady: true });
+        void get().loadConversations();
+      } else {
+        clearStoredToken();
+        set({ authReady: true });
+      }
+    } catch {
+      set({ authReady: true });
+    }
+  },
+
+  register: async name => {
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register', name }),
+      });
+      const data = await res.json();
+      if (!res.ok) return { ok: false, error: data.error || 'Registration failed' };
+      setStoredToken(data.token);
+      set({ student: data.student, justRegistered: true, freshToken: data.token, stats: { conversations: 0, lessonsCompleted: 0, quizAttempts: 0, flashcards: 0 } });
+      void get().loadConversations();
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Network error — please try again.' };
+    }
+  },
+
+  login: async token => {
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', token }),
+      });
+      const data = await res.json();
+      if (!res.ok) return { ok: false, error: data.error || 'Login failed' };
+      setStoredToken(data.token);
+      set({ student: data.student, justRegistered: false, freshToken: '' });
+      // fetch profile with stats
+      void get().refreshStudent().then(() => get().loadConversations());
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Network error — please try again.' };
+    }
+  },
+
+  logout: () => {
+    clearStoredToken();
+    set({
+      student: null,
+      stats: null,
+      conversations: [],
+      conversationsLoaded: false,
+      activeConversationId: null,
+      messages: [],
+      view: 'chat',
+      justRegistered: false,
+      freshToken: '',
+    });
+  },
+
+  dismissIntroCard: () => set({ justRegistered: false, freshToken: '' }),
+
+  refreshStudent: async () => {
+    try {
+      const res = await apiFetch('/api/auth');
+      if (res.ok) {
+        const data = await res.json();
+        set({ student: data.student, stats: data.stats });
+      }
+    } catch {
+      /* silent */
+    }
+  },
 
   setView: v => set({ view: v, sidebarOpen: false }),
   toggleSidebar: () => set(s => ({ sidebarOpen: !s.sidebarOpen })),
@@ -97,7 +235,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadConversations: async () => {
     try {
-      const res = await fetch('/api/conversations');
+      const res = await apiFetch('/api/conversations');
       const data = await res.json();
       set({ conversations: data.conversations || [], conversationsLoaded: true });
     } catch {
@@ -108,7 +246,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   openConversation: async id => {
     set({ activeConversationId: id, view: 'chat', sidebarOpen: false, messages: [], thinking: false });
     try {
-      const res = await fetch(`/api/conversations/${id}`);
+      const res = await apiFetch(`/api/conversations/${id}`);
       const data = await res.json();
       if (data.conversation) {
         set({
@@ -139,7 +277,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
 
   deleteConversation: async id => {
-    await fetch(`/api/conversations?id=${id}`, { method: 'DELETE' }).catch(() => null);
+    await apiFetch(`/api/conversations?id=${id}`, { method: 'DELETE' }).catch(() => null);
     set(s => ({
       conversations: s.conversations.filter(c => c.id !== id),
       activeConversationId: s.activeConversationId === id ? null : s.activeConversationId,
@@ -190,9 +328,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set(s => ({ messages: [...s.messages, userMsg], thinking: true }));
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await apiFetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           conversationId: state.activeConversationId,
           message: trimmed,
@@ -211,8 +348,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         activeConversationId: data.conversationId,
       }));
 
-      // refresh conversation list (title may have changed)
+      // refresh conversation list (title may have changed) + stats snapshot
       void get().loadConversations();
+      void get().refreshStudent();
       return data.reply as string;
     } catch (e) {
       const errMsg: ChatMessage = {

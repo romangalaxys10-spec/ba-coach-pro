@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSkill, BA_SKILLS } from '@/data/skills-data';
+import { db } from '@/lib/db';
+import { getAuthedStudent, unauthorized } from '@/lib/auth';
+import { triggerSync } from '@/lib/github-sync';
 
 export const maxDuration = 300;
 
@@ -87,4 +90,33 @@ Rules:
       { status: 500 }
     );
   }
+}
+
+/** PUT /api/flashcards — persist spaced-repetition stats { skillSlug, known, total } */
+export async function PUT(req: NextRequest) {
+  try {
+    const student = await getAuthedStudent(req);
+    if (!student) return unauthorized();
+
+    const { skillSlug, known, total } = await req.json();
+    if (!skillSlug) return NextResponse.json({ error: 'skillSlug required' }, { status: 400 });
+
+    const stat = await db.flashcardStat.upsert({
+      where: { studentId_skillSlug: { studentId: student.id, skillSlug } },
+      update: { known: Math.max(0, Number(known) || 0), total: Math.max(0, Number(total) || 0), updatedAt: new Date() },
+      create: { studentId: student.id, skillSlug, known: Math.max(0, Number(known) || 0), total: Math.max(0, Number(total) || 0) },
+    });
+    triggerSync(student.id, `flashcards: ${skillSlug}`);
+    return NextResponse.json({ stat });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 500 });
+  }
+}
+
+/** GET /api/flashcards — saved stats for the student */
+export async function GET(req: NextRequest) {
+  const student = await getAuthedStudent(req);
+  if (!student) return unauthorized();
+  const stats = await db.flashcardStat.findMany({ where: { studentId: student.id } });
+  return NextResponse.json({ stats });
 }

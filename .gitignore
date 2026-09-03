@@ -61,3 +61,6 @@ server.log
 /scripts/*.png
 /scripts/*.wav
 /scripts/*.json
+
+# dev/test scripts (contain live tokens during verification)
+/scripts/

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { BA_SKILLS, CATEGORY_META } from '@/data/skills-data';
 import { BA_CASES } from '@/data/cases-data';
 import { useAppStore } from '@/lib/store';
+import { apiFetch } from '@/lib/client-api';
 import { Markdown } from '@/components/markdown';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -144,9 +145,8 @@ function QuizTab() {
     setAnswers([]);
     try {
       const isCategory = ['mixed', ...Object.keys(CATEGORY_META)].includes(scope);
-      const res = await fetch('/api/quiz', {
+      const res = await apiFetch('/api/quiz', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           skillSlug: isCategory ? undefined : scope,
           category: isCategory ? scope : undefined,
@@ -319,9 +319,8 @@ function FlashcardsTab() {
     setKnown(new Set());
     try {
       const isCategory = ['mixed', ...Object.keys(CATEGORY_META)].includes(scope);
-      const res = await fetch('/api/flashcards', {
+      const res = await apiFetch('/api/flashcards', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           skillSlug: isCategory ? undefined : scope,
           category: isCategory ? scope : undefined,

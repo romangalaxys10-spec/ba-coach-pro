@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSkill, BA_SKILLS } from '@/data/skills-data';
+import { getAuthedStudent, unauthorized } from '@/lib/auth';
+import { triggerSync } from '@/lib/github-sync';
 
 export const maxDuration = 300;
 
@@ -125,9 +127,13 @@ Rules:
 export async function PUT(req: NextRequest) {
   // save attempt
   try {
+    const student = await getAuthedStudent(req);
+    if (!student) return unauthorized();
+
     const { skillSlug, category, score, total, details } = await req.json();
     const attempt = await db.quizAttempt.create({
       data: {
+        studentId: student.id,
         skillSlug: skillSlug || (category || 'mixed'),
         category: category || 'mixed',
         score: Number(score) || 0,
@@ -135,6 +141,7 @@ export async function PUT(req: NextRequest) {
         details: JSON.stringify(details || []),
       },
     });
+    triggerSync(student.id, `quiz: ${attempt.skillSlug} ${attempt.score}/${attempt.total}`);
     return NextResponse.json({ attempt });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 500 });

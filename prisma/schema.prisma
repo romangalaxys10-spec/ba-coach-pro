@@ -7,13 +7,33 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Student {
+  id             String   @id @default(cuid())
+  name           String
+  token          String   @unique // BAC-XXXX-XXXX-XXXX-XXXX secret login token
+  createdAt      DateTime @default(now())
+  lastActiveAt   DateTime @default(now())
+  // GitHub pairing (PaT + repo) — enables personal cloud backup & real-time sync
+  githubToken    String?
+  githubRepo     String?
+  githubOwner    String?
+  githubSyncedAt DateTime?
+  autoSync       Boolean  @default(true)
+  conversations  Conversation[]
+  quizAttempts   QuizAttempt[]
+  lessonProgress LessonProgress[]
+  flashcardStats FlashcardStat[]
+}
+
 model Conversation {
-  id        String    @id @default(cuid())
-  title     String    @default("New conversation")
-  mode      String    @default("coach") // coach | skill | interviewer
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  title     String   @default("New conversation")
+  mode      String   @default("coach") // coach | skill | interviewer
   skillSlug String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   messages  Message[]
 }
 
@@ -27,26 +47,36 @@ model Message {
 }
 
 model QuizAttempt {
-  id          String   @id @default(cuid())
-  skillSlug   String
-  category    String
-  score       Int
-  total       Int
-  details     String   @default("[]") // JSON array of {question, chosen, correct, isCorrect}
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  skillSlug String
+  category  String
+  score     Int
+  total     Int
+  details   String   @default("[]") // JSON array of {question, chosen, correct, isCorrect}
+  createdAt DateTime @default(now())
 }
 
 model LessonProgress {
   id        String   @id @default(cuid())
-  itemId    String   @unique // skill slug
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  itemId    String // skill slug
   completed Boolean  @default(false)
   updatedAt DateTime @updatedAt
+
+  @@unique([studentId, itemId])
 }
 
 model FlashcardStat {
-  id         String   @id @default(cuid())
-  skillSlug  String
-  known      Int      @default(0)
-  total      Int      @default(0)
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  skillSlug String
+  known     Int      @default(0)
+  total     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, skillSlug])
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { AppSidebar } from '@/components/app-sidebar';
 import { ChatView } from '@/components/chat-view';
@@ -7,18 +8,48 @@ import { SkillsLibrary } from '@/components/skills-library';
 import { LearnView } from '@/components/learn-view';
 import { PracticeView } from '@/components/practice-view';
 import { TemplatesView } from '@/components/templates-view';
+import { SettingsView } from '@/components/settings-view';
+import { AuthGate } from '@/components/auth-gate';
 import { GraduationCap, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export default function Home() {
   const view = useAppStore(s => s.view);
+  const authReady = useAppStore(s => s.authReady);
+  const student = useAppStore(s => s.student);
+  const justRegistered = useAppStore(s => s.justRegistered);
+  const bootstrap = useAppStore(s => s.bootstrap);
+  const sidebarOpen = useAppStore(s => s.sidebarOpen);
   const toggleSidebar = useAppStore(s => s.toggleSidebar);
+
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
+
+  if (!authReady) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <div className="flex h-12 w-12 animate-pulse items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30">
+            <GraduationCap className="h-6 w-6" />
+          </div>
+          <p className="text-sm">Preparing your academy…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // keep AuthGate mounted after registration so the intro card (name + secret
+  // token) is shown before entering the app
+  if (!student || justRegistered) {
+    return <AuthGate />;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* mobile overlay */}
-      {useAppStore(s => s.sidebarOpen) && (
+      {sidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
           onClick={toggleSidebar}
@@ -45,6 +76,7 @@ export default function Home() {
           {view === 'learn' && <LearnView />}
           {view === 'practice' && <PracticeView />}
           {view === 'templates' && <TemplatesView />}
+          {view === 'settings' && <SettingsView />}
         </div>
       </main>
     </div>

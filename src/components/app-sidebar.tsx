@@ -18,6 +18,9 @@ import {
   X,
   Target,
   PencilRuler,
+  Settings,
+  LogOut,
+  CircleUserRound,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +30,7 @@ const NAV: { view: View; label: string; icon: typeof Library; hint?: string }[] 
   { view: 'learn', label: 'Learning Tracks', icon: Route },
   { view: 'practice', label: 'Practice Arena', icon: Dumbbell },
   { view: 'templates', label: 'BA Templates', icon: FileText, hint: '9' },
+  { view: 'settings', label: 'Profile & GitHub', icon: Settings },
 ];
 
 export function AppSidebar() {
@@ -133,6 +137,35 @@ export function AppSidebar() {
 
       {/* footer */}
       <div className="border-t border-sidebar-border p-3">
+        {/* student card */}
+        <div className="mb-2 flex items-center gap-2.5 rounded-xl border border-sidebar-border bg-card/60 px-2.5 py-2">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+            <CircleUserRound className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-semibold">{store.student?.name || 'Student'}</div>
+            <div className="truncate text-[10px] text-muted-foreground">
+              {store.student?.github?.paired ? 'GitHub backup on' : 'token-secured account'}
+            </div>
+          </div>
+          <button
+            onClick={() => store.setView('settings')}
+            className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+            aria-label="Open settings"
+            title="Settings"
+          >
+            <Settings className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={store.logout}
+            className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            aria-label="Log out"
+            title="Log out (keep your token!)"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
         <button
           onClick={() => store.setTheme(store.theme === 'dark' ? 'light' : 'dark')}
           className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-sidebar-accent/60"

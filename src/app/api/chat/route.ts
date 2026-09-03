@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { buildCoachPrompt, buildInterviewerScenario, type ChatMode } from '@/lib/coach-prompt';
+import { getAuthedStudent, unauthorized } from '@/lib/auth';
+import { triggerSync } from '@/lib/github-sync';
 
 export const maxDuration = 300;
 
@@ -44,14 +46,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
+    const student = await getAuthedStudent(req);
+    if (!student) return unauthorized();
+
     // ---- resolve conversation ----
     let conversation = body.conversationId
-      ? await db.conversation.findUnique({ where: { id: body.conversationId }, include: { messages: true } })
+      ? await db.conversation.findFirst({
+          where: { id: body.conversationId, studentId: student.id },
+          include: { messages: true },
+        })
       : null;
 
     if (!conversation) {
       conversation = await db.conversation.create({
         data: {
+          studentId: student.id,
           title: 'New conversation',
           mode,
           skillSlug: body.skillSlug || null,
@@ -74,9 +83,12 @@ export async function POST(req: NextRequest) {
           ? buildCoachPrompt('feedback')
           : buildCoachPrompt(mode, body.skillSlug || conversation.skillSlug);
 
+    const msgCount = await db.message.count({ where: { conversationId: conversation.id } });
     const history = await db.message.findMany({
       where: { conversationId: conversation.id },
       orderBy: { createdAt: 'asc' },
+      // last 40 messages (includes the user message just saved)
+      skip: Math.max(0, msgCount - 40),
       take: 40,
     });
 
@@ -104,6 +116,9 @@ export async function POST(req: NextRequest) {
       where: { id: conversation.id },
       data: { title, mode, skillSlug: body.skillSlug || conversation.skillSlug, updatedAt: new Date() },
     });
+
+    // ---- real-time backup to the student's paired GitHub repo ----
+    triggerSync(student.id, `chat: ${title}`);
 
     return NextResponse.json({
       conversationId: conversation.id,
