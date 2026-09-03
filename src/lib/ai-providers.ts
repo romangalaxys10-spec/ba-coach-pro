@@ -106,6 +106,60 @@ export const AI_PROVIDER_PRESETS: ProviderPreset[] = [
 
 export const PRESET_IDS = AI_PROVIDER_PRESETS.map(p => p.id);
 
+/* ------------------------------------------------------------------ */
+/* Discovery / validation layer — shared client+server types           */
+/* ------------------------------------------------------------------ */
+
+export type DiscoveryStatus =
+  | 'connected'
+  | 'authentication_failed'
+  | 'models_unavailable'
+  | 'provider_unreachable'
+  | 'invalid_configuration';
+
+export type ModelAvailability = 'available' | 'unavailable' | 'retired' | 'unknown';
+
+export interface ProviderModelCapabilities {
+  chat?: boolean;
+  completion?: boolean;
+  vision?: boolean;
+  tools?: boolean;
+  reasoning?: boolean;
+  embeddings?: boolean;
+}
+
+export interface ProviderModel {
+  id: string;
+  name?: string;
+  provider: string;
+  capabilities?: ProviderModelCapabilities;
+  contextWindow?: number;
+  deprecated?: boolean;
+  lifecycle?: {
+    status?: 'active' | 'deprecated' | 'retired' | 'unknown';
+    endOfLife?: string;
+  };
+  /** true when this entry comes from static fallback metadata, NOT the provider's live API */
+  unverified?: boolean;
+  raw?: unknown;
+}
+
+/** What the model-discovery layer returns to the UI. */
+export interface ProviderDiscovery {
+  status: DiscoveryStatus;
+  message: string;
+  models: ProviderModel[];
+  count: number;
+  fetchedAt?: string | null;
+  fallbackUsed?: boolean;
+}
+
+export interface SavedModelState {
+  id: string | null;
+  state: ModelAvailability | 'none';
+  message?: string;
+}
+
 export function getPreset(id: string | null | undefined): ProviderPreset | null {
   if (!id) return null;
   return AI_PROVIDER_PRESETS.find(p => p.id === id) || null;

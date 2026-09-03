@@ -3,8 +3,7 @@ import { db } from '@/lib/db';
 import { buildCoachPrompt, buildInterviewerScenario, type ChatMode } from '@/lib/coach-prompt';
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
-import { callLLM } from '@/lib/ai';
-import { studentAIOverride } from '@/lib/ai-providers';
+import { callLLMForStudent } from '@/lib/provider-runtime';
 
 export const maxDuration = 300;
 
@@ -77,7 +76,7 @@ export async function POST(req: NextRequest) {
       ...history.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content })),
     ];
 
-    const reply = await callLLM(llmMessages, 2, studentAIOverride(student));
+    const reply = await callLLMForStudent(student, llmMessages);
 
     await db.message.create({
       data: { conversationId: conversation.id, role: 'assistant', content: reply },

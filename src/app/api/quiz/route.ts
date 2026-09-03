@@ -3,8 +3,7 @@ import { db } from '@/lib/db';
 import { getSkill, BA_SKILLS } from '@/data/skills-data';
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
-import { callLLM } from '@/lib/ai';
-import { studentAIOverride } from '@/lib/ai-providers';
+import { callLLMForStudent } from '@/lib/provider-runtime';
 
 export const maxDuration = 300;
 
@@ -87,13 +86,12 @@ Rules:
 - questions must be answerable from the technique knowledge provided, scenario-grounded where possible
 - no "all of the above" options`;
 
-    const raw = await callLLM(
+    const raw = await callLLMForStudent(
+      student,
       [
         { role: 'assistant', content: system },
         { role: 'user', content: `Generate the quiz now (${n} questions, difficulty: ${difficulty}).` },
-      ],
-      2,
-      studentAIOverride(student)
+      ]
     );
 
     const parsed = extractJson(raw) as { questions?: QuizQuestion[] } | QuizQuestion[];

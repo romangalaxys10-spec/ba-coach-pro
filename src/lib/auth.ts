@@ -48,6 +48,7 @@ export type AuthedStudent = {
   aiApiKey: string | null;
   aiModel: string | null;
   aiVerifiedAt: Date | null;
+  aiRetiredModels: string | null;
 };
 
 export async function getAuthedStudent(req: NextRequest): Promise<AuthedStudent | null> {
@@ -79,6 +80,7 @@ export async function getAuthedStudent(req: NextRequest): Promise<AuthedStudent 
     aiApiKey: student.aiApiKey,
     aiModel: student.aiModel,
     aiVerifiedAt: student.aiVerifiedAt,
+    aiRetiredModels: student.aiRetiredModels,
   };
 }
 

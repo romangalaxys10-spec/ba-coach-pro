@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { v4 as uuid } from 'uuid';
 import { apiFetch, getStoredToken, setStoredToken, clearStoredToken, readJson } from '@/lib/client-api';
+import type { ProviderDiscovery, SavedModelState } from '@/lib/ai-providers';
 
 export type View = 'chat' | 'skills' | 'learn' | 'practice' | 'templates' | 'settings';
 export type ChatMode = 'coach' | 'skill' | 'interviewer';
@@ -86,7 +87,21 @@ interface AppState {
   logout: () => void;
   dismissIntroCard: () => void;
   refreshStudent: () => Promise<void>;
-  saveAiProvider: (cfg: { providerId: string; baseUrl?: string; apiKey?: string; model?: string }) => Promise<{ ok: boolean; error?: string; provider?: AiProviderInfo | null }>;
+  saveAiProvider: (cfg: { providerId: string; baseUrl?: string; apiKey?: string; model?: string }) => Promise<{
+    ok: boolean;
+    error?: string;
+    provider?: AiProviderInfo | null;
+    discovery?: ProviderDiscovery;
+    savedModel?: SavedModelState;
+    notice?: string;
+  }>;
+  fetchProviderModels: (force?: boolean) => Promise<{
+    ok: boolean;
+    error?: string;
+    discovery?: ProviderDiscovery;
+    savedModel?: SavedModelState;
+    provider?: AiProviderInfo | null;
+  }>;
   clearAiProvider: () => Promise<{ ok: boolean; error?: string }>;
 
   setView: (v: View) => void;
@@ -236,13 +251,43 @@ export const useAppStore = create<AppState>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cfg),
       });
-      const data = await readJson<{ ok?: boolean; error?: string; provider?: AiProviderInfo }>(res);
+      const data = await readJson<{
+        ok?: boolean;
+        error?: string;
+        provider?: AiProviderInfo;
+        discovery?: ProviderDiscovery;
+        savedModel?: SavedModelState;
+        notice?: string;
+      }>(res);
       if (!res.ok) return { ok: false, error: data.error || `Save failed (${res.status})` };
       const s = get().student;
-      if (s) set({ student: { ...s, aiProvider: data.provider || null } });
-      return { ok: true, provider: data.provider || null };
+      if (s && data.provider) set({ student: { ...s, aiProvider: data.provider } });
+      return { ok: true, provider: data.provider || null, discovery: data.discovery, savedModel: data.savedModel, notice: data.notice, error: data.error };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : 'Save failed' };
+    }
+  },
+
+  fetchProviderModels: async (force = true) => {
+    try {
+      const res = await apiFetch('/api/ai-provider/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force }),
+      });
+      const data = await readJson<{
+        ok?: boolean;
+        error?: string;
+        provider?: AiProviderInfo;
+        discovery?: ProviderDiscovery;
+        savedModel?: SavedModelState;
+      }>(res);
+      if (!res.ok) return { ok: false, error: data.error || `Refresh failed (${res.status})` };
+      const s = get().student;
+      if (s && data.provider) set({ student: { ...s, aiProvider: data.provider } });
+      return { ok: Boolean(data.ok), discovery: data.discovery, savedModel: data.savedModel, provider: data.provider || null, error: data.error };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Refresh failed' };
     }
   },
 

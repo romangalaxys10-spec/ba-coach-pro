@@ -26,6 +26,10 @@ model Student {
   aiApiKey       String?
   aiModel        String?
   aiVerifiedAt   DateTime?
+  // Model discovery state (source of truth = provider's live API response)
+  aiModelsCache    String?   @default("[]") // JSON ProviderModel[] (trimmed, capped)
+  aiModelsFetchedAt DateTime?
+  aiRetiredModels  String?   @default("[]") // JSON string[] — models the provider retired (HTTP 410 / definitive 404)
   conversations  Conversation[]
   quizAttempts   QuizAttempt[]
   lessonProgress LessonProgress[]

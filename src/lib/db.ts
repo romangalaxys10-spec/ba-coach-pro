@@ -25,8 +25,34 @@ export const schemaReady: Promise<void> = (async () => {
       "githubRepo" TEXT,
       "githubOwner" TEXT,
       "githubSyncedAt" DATETIME,
-      "autoSync" BOOLEAN NOT NULL DEFAULT true
+      "autoSync" BOOLEAN NOT NULL DEFAULT true,
+      "aiProviderId" TEXT,
+      "aiBaseUrl" TEXT,
+      "aiApiKey" TEXT,
+      "aiModel" TEXT,
+      "aiVerifiedAt" DATETIME,
+      "aiModelsCache" TEXT,
+      "aiModelsFetchedAt" DATETIME,
+      "aiRetiredModels" TEXT
     );`);
+    // Older databases created before a schema extension keep their original
+    // columns — SQLite has no ADD COLUMN IF NOT EXISTS, so best-effort ALTERs.
+    for (const col of [
+      '"aiProviderId" TEXT',
+      '"aiBaseUrl" TEXT',
+      '"aiApiKey" TEXT',
+      '"aiModel" TEXT',
+      '"aiVerifiedAt" DATETIME',
+      '"aiModelsCache" TEXT',
+      '"aiModelsFetchedAt" DATETIME',
+      '"aiRetiredModels" TEXT',
+    ]) {
+      try {
+        await client.$executeRawUnsafe(`ALTER TABLE "Student" ADD COLUMN ${col};`);
+      } catch {
+        /* column already exists */
+      }
+    }
     await client.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Student_token_key" ON "Student"("token");`);
     await client.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Conversation" (
       "id" TEXT NOT NULL PRIMARY KEY,

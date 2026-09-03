@@ -105,6 +105,18 @@ export interface StudentAIOverride {
   model: string;
 }
 
+/** HTTP-level failure from an OpenAI-compatible provider, with body for classification. */
+export class ProviderHttpError extends Error {
+  status: number;
+  body: string;
+  constructor(status: number, body: string) {
+    super(`AI endpoint responded ${status}: ${body.slice(0, 240)}`);
+    this.name = 'ProviderHttpError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
 const isZaiHost = (base: string) => /(^|\.)z\.ai($|:|\/)/i.test(base);
 
 /** One OpenAI chat/completions call against an arbitrary compatible base URL. */
@@ -113,24 +125,35 @@ async function callViaOpenAI(
   base: string,
   apiKey: string,
   model: string,
-  timeoutMs = 180_000
+  timeoutMs = 180_000,
+  extra?: Record<string, unknown>
 ): Promise<string> {
   // `thinking` is a Z.ai-only extension — other providers reject unknown args.
   const body: Record<string, unknown> = { model, messages };
   if (isZaiHost(base)) body.thinking = { type: 'disabled' };
+  if (extra) Object.assign(body, extra);
 
-  const res = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    // Normalise network/abort failures so callers can classify them.
+    const msg = e instanceof Error ? e.message : String(e);
+    const err = new Error(/timeout|aborted/i.test(msg) ? `Request timed out after ${timeoutMs}ms` : `Fetch failed: ${msg}`);
+    err.name = /timeout|aborted/i.test(msg) ? 'ProviderTimeoutError' : 'ProviderNetworkError';
+    throw err;
+  }
   if (!res.ok) {
-    const text = (await res.text().catch(() => '')).slice(0, 240);
-    throw new Error(`AI endpoint responded ${res.status}: ${text}`);
+    const text = (await res.text().catch(() => '')).slice(0, 800);
+    throw new ProviderHttpError(res.status, text);
   }
   const data = (await res.json()) as {
     choices?: { message?: { content?: string } }[];
@@ -141,15 +164,29 @@ async function callViaOpenAI(
 }
 
 /**
+ * Errors that will NEVER succeed on retry — the provider gave a definitive
+ * answer about this credential/model. Retrying causes runaway loops (and on
+ * Vercel, function timeouts → 502 Bad Gateway).
+ */
+export function isDefinitiveModelError(e: unknown): boolean {
+  if (e instanceof ProviderHttpError) {
+    if (e.status === 401 || e.status === 403 || e.status === 410) return true;
+    if (e.status === 404 && /model/i.test(e.body)) return true;
+  }
+  return false;
+}
+
+/**
  * One LLM call against a student-configured provider.
- * Exported for the Settings → AI Provider "Test connection" endpoint.
+ * Used by the discovery layer (model probes) and the test endpoint.
  */
 export async function callLLMCustom(
   messages: ChatMsg[],
   override: StudentAIOverride,
-  timeoutMs = 60_000
+  timeoutMs = 90_000,
+  extra?: Record<string, unknown>
 ): Promise<string> {
-  return callViaOpenAI(messages, override.baseUrl, override.apiKey, override.model, timeoutMs);
+  return callViaOpenAI(messages, override.baseUrl, override.apiKey, override.model, timeoutMs, extra);
 }
 
 async function callViaEnvKey(messages: ChatMsg[]): Promise<string> {
@@ -200,9 +237,14 @@ export async function callLLM(
     let lastErr: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        return await callLLMCustom(messages, override);
+        // 90s per attempt keeps worst-case retries inside Vercel's function
+        // limits (2 × 90s < 300s) — longer ceilings caused ALB 502s.
+        return await callLLMCustom(messages, override, 90_000);
       } catch (e) {
         lastErr = e;
+        // Definitive answers (401/403/410/404-model) are never retried —
+        // the provider has made a final decision about this key/model.
+        if (isDefinitiveModelError(e)) break;
         if (attempt < retries) await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
       }
     }
