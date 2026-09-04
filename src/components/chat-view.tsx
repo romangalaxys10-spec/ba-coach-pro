@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { parseQuizContent, speakableText, QuizBlock } from '@/components/quiz-block';
+import { programById } from '@/lib/programs';
 
 const VOICES = [
   { id: 'jam', label: 'James (British)' },
@@ -35,7 +37,7 @@ const VOICES = [
   { id: 'douji', label: 'Dou (Natural)' },
 ];
 
-const SUGGESTIONS = [
+const BA_SUGGESTIONS = [
   {
     icon: Compass,
     title: 'Frame a business problem',
@@ -56,14 +58,104 @@ const SUGGESTIONS = [
     title: 'Prioritise a backlog',
     prompt: 'Teach me how to prioritise requirements with MoSCoW using a worked example, then give me a practice exercise.',
   },
+  {
+    icon: BookOpenCheck,
+    title: 'Test me',
+    prompt: 'Give me a 5-question multiple-choice test on core BA technique (mix elicitation, requirements quality and prioritisation), then explain each answer.',
+  },
 ];
 
-const CAPABILITIES = [
-  { icon: GraduationCap, label: '53 BA techniques', desc: 'Coached step-by-step from the skill library' },
-  { icon: Mic, label: 'Voice conversations', desc: 'Speak to your coach, hear spoken answers' },
-  { icon: BookOpenCheck, label: 'Guided learning tracks', desc: '7 structured journeys, beginner to pro' },
-  { icon: BrainCircuit, label: 'Practice arena', desc: 'Quizzes, flashcards & interview simulator' },
+const ENGLISH_SUGGESTIONS = [
+  {
+    icon: MessagesSquare,
+    title: 'Everyday roleplay',
+    prompt: 'Let\'s roleplay ordering a meal at a café. Play the waiter, correct my mistakes gently, and teach me useful phrases as we go.',
+  },
+  {
+    icon: Compass,
+    title: 'Check my writing',
+    prompt: 'I\'ll write a short paragraph about my typical day — check my grammar and vocabulary, explain my mistakes, and show me a better version.',
+  },
+  {
+    icon: ClipboardList,
+    title: 'Grow my vocabulary',
+    prompt: 'Teach me 8 useful intermediate words or phrases for talking about work, with examples, then quiz me on using them.',
+  },
+  {
+    icon: Target,
+    title: 'Exam speaking practice',
+    prompt: 'Act as an IELTS speaking examiner. Ask me part 1 and part 2 questions, then give me band feedback and one clear improvement tip.',
+  },
+  {
+    icon: BookOpenCheck,
+    title: 'Test me',
+    prompt: 'Give me a 5-question multiple-choice English test at my level — mix grammar, vocabulary and use-of-English — then explain each answer.',
+  },
 ];
+
+const HRBP_SUGGESTIONS = [
+  {
+    icon: Compass,
+    title: 'Diagnose a people problem',
+    prompt: 'A team is losing its best people and morale is low. Coach me through structuring a proper diagnosis before we jump to solutions.',
+  },
+  {
+    icon: MessagesSquare,
+    title: 'Rehearse a hard conversation',
+    prompt: 'Roleplay a performance conversation with a defensive senior employee. Play them realistically, then debrief my approach.',
+  },
+  {
+    icon: ClipboardList,
+    title: 'Design an onboarding plan',
+    prompt: 'Help me design a 30/60/90-day onboarding plan for a new HR analyst, with milestones and a check-in cadence.',
+  },
+  {
+    icon: Target,
+    title: 'Build a learning needs analysis',
+    prompt: 'Teach me how to run a learning needs analysis for a struggling department, then guide me through a mock one step by step.',
+  },
+  {
+    icon: BookOpenCheck,
+    title: 'Test me',
+    prompt: 'Give me a 5-question multiple-choice test on HRBP and L&D practice — mix people analytics, engagement and learning design — then explain each answer.',
+  },
+];
+
+const PROGRAM_EMPTY: Record<string, { title: string; sub: string }> = {
+  english: {
+    title: 'Your personal English tutor',
+    sub: 'Practise speaking, writing, grammar and exam skills with live corrections. Ask anything, or pick a starting point below.',
+  },
+  hrbp: {
+    title: 'Your personal HRBP / L&D coach',
+    sub: 'Master HR business partnering and learning & development — frameworks, roleplays and evidence-based practice. Ask anything, or pick a starting point below.',
+  },
+  ba: {
+    title: 'Your personal Business Analyst coach',
+    sub: 'Learn, practise and rehearse business analysis — from problem framing to delivery-ready requirements. Ask anything, or pick a starting point below.',
+  },
+};
+
+const PROGRAM_COACH: Record<string, string> = {
+  english: 'English Tutor',
+  hrbp: 'HRBP Coach',
+  ba: 'BA Coach',
+};
+
+const PROGRAM_PLACEHOLDER: Record<string, string> = {
+  english: 'Ask your English tutor anything — or paste text to improve…',
+  hrbp: 'Ask your HRBP coach anything…',
+  ba: 'Ask your BA coach anything…',
+};
+
+const CAPABILITIES = [
+  { icon: GraduationCap, label: '53 BA techniques', desc: 'Coached step-by-step from the skill library', ba: true },
+  { icon: Mic, label: 'Voice conversations', desc: 'Speak to your coach, hear spoken answers', ba: false },
+  { icon: BookOpenCheck, label: 'Guided learning tracks', desc: '7 structured journeys, beginner to pro', ba: true },
+  { icon: BrainCircuit, label: 'Practice arena', desc: 'Quizzes, flashcards & interview simulator', ba: true },
+  { icon: BookOpenCheck, label: 'Full course curriculum', desc: 'A1 to C2, business English and exam prep', ba: false, program: 'english' },
+  { icon: BrainCircuit, label: 'Roleplays & feedback', desc: 'Live scenarios scored like a professional mentor', ba: false, program: 'hrbp' },
+] as { icon: typeof GraduationCap; label: string; desc: string; ba?: boolean; program?: string }[];
 
 function useAutoScroll(dep: unknown) {
   const ref = useRef<HTMLDivElement>(null);
@@ -134,7 +226,7 @@ export function ChatView() {
     stopSpeaking();
     const reply = await store.sendMessage(content);
     if (reply && store.autoSpeak) {
-      speak('latest', reply);
+      speak('latest', speakableText(reply) || 'I have prepared an interactive quiz for you — answer it right here in the chat.');
     }
   };
 
@@ -170,13 +262,17 @@ export function ChatView() {
   };
 
   const isEmpty = store.messages.length === 0 && !store.thinking;
+  const program = programById(store.student?.program);
+  const isBA = program.id === 'ba';
+  const suggestions = isBA ? BA_SUGGESTIONS : program.id === 'english' ? ENGLISH_SUGGESTIONS : HRBP_SUGGESTIONS;
+  const empty = PROGRAM_EMPTY[program.id] || PROGRAM_EMPTY.ba;
 
   const modeLabel =
     store.chatMode === 'interviewer'
       ? 'Interview Simulator'
       : store.chatMode === 'skill' && store.activeSkillSlug
         ? store.activeSkillSlug.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
-        : 'BA Coach';
+        : PROGRAM_COACH[program.id] || PROGRAM_COACH.ba;
 
   return (
     <div className="flex h-full flex-col">
@@ -258,14 +354,13 @@ export function ChatView() {
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
                 <GraduationCap className="h-7 w-7" />
               </div>
-              <h1 className="text-2xl font-semibold tracking-tight">Your personal Business Analyst coach</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">{empty.title}</h1>
               <p className="max-w-md text-sm text-muted-foreground">
-                Learn, practise and rehearse business analysis — from problem framing to delivery-ready
-                requirements. Ask anything, or pick a starting point below.
+                {empty.sub}
               </p>
             </div>
             <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
-              {SUGGESTIONS.map(s => (
+              {suggestions.map(s => (
                 <button
                   key={s.title}
                   onClick={() => void send(s.prompt)}
@@ -280,7 +375,7 @@ export function ChatView() {
               ))}
             </div>
             <div className="mt-8 grid w-full grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-              {CAPABILITIES.map(c => (
+              {CAPABILITIES.filter(c => (isBA ? c.ba : c.program === program.id)).map(c => (
                 <div key={c.label} className="flex flex-col items-center gap-1 text-center">
                   <c.icon className="h-4 w-4 text-primary/80" />
                   <div className="text-xs font-medium">{c.label}</div>
@@ -306,7 +401,13 @@ export function ChatView() {
                   ) : (
                     <>
                       <div className="rounded-2xl rounded-bl-md border border-border/50 bg-card px-4 py-3 text-sm">
-                        <Markdown content={m.content} />
+                        {parseQuizContent(m.content).map((seg, si) =>
+                          seg.kind === 'quiz' ? (
+                            <QuizBlock key={si} quiz={seg.quiz} />
+                          ) : seg.text.trim() ? (
+                            <Markdown key={si} content={seg.text} />
+                          ) : null
+                        )}
                       </div>
                       <div className="mt-1.5 flex gap-1">
                         <Button
@@ -327,7 +428,7 @@ export function ChatView() {
                             'h-7 gap-1 px-2 text-xs text-muted-foreground',
                             speakingId === m.id && 'text-primary'
                           )}
-                          onClick={() => speak(m.id, m.content)}
+                          onClick={() => speak(m.id, speakableText(m.content) || 'This reply is an interactive quiz — answer it right here in the chat.')}
                         >
                           {speakingId === m.id ? (
                             <span className="flex h-3 items-end gap-[2px]">
@@ -381,7 +482,7 @@ export function ChatView() {
               placeholder={
                 store.chatMode === 'interviewer'
                   ? 'Ask your stakeholder a question… (or speak)'
-                  : 'Ask your BA coach anything…'
+                  : PROGRAM_PLACEHOLDER[program.id] || PROGRAM_PLACEHOLDER.ba
               }
               className="max-h-[180px] flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground"
               aria-label="Message"
@@ -413,7 +514,9 @@ export function ChatView() {
                 ? 'Transcribing your voice…'
                 : store.chatMode === 'interviewer'
                   ? 'Practise elicitation. Say "END_SIM" or press End & get feedback for your debrief.'
-                  : 'Ada coaches with BA skill packs · Enter to send, Shift+Enter for a new line'}
+                  : isBA
+                    ? 'Ada coaches with BA skill packs · Enter to send, Shift+Enter for a new line'
+                    : `${program.name} coaching · Enter to send, Shift+Enter for a new line`}
           </p>
         </div>
       </div>

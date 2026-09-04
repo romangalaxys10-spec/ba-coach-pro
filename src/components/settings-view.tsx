@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import { apiFetch, readJson } from '@/lib/client-api';
 import { AI_PROVIDER_PRESETS, getPreset } from '@/lib/ai-providers';
 import type { FastestResult } from '@/lib/model-speed';
 import { BA_LEVELS, computeCareerProgress, levelById } from '@/lib/levels';
+import { programById } from '@/lib/programs';
+import { getProgramCurriculum } from '@/lib/program-curriculum';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -51,8 +53,14 @@ export function SettingsView() {
   const stats = useAppStore(s => s.stats);
   const refreshStudent = useAppStore(s => s.refreshStudent);
 
+  const defaultRepo = student?.program === 'english'
+    ? 'english-tutor-progress'
+    : student?.program === 'hrbp'
+      ? 'hrbp-coach-progress'
+      : 'ba-coach-progress';
+
   const [pat, setPat] = useState('');
-  const [repoName, setRepoName] = useState('ba-coach-progress');
+  const [repoName, setRepoName] = useState(defaultRepo);
   const [pairing, setPairing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -62,6 +70,10 @@ export function SettingsView() {
   useEffect(() => {
     void refreshStudent();
   }, [refreshStudent]);
+
+  useEffect(() => {
+    setRepoName(defaultRepo);
+  }, [defaultRepo]);
 
   if (!student) return null;
 
@@ -165,6 +177,14 @@ export function SettingsView() {
                   <Badge variant="outline" className="border-primary/40 bg-primary/10 text-[10px] text-primary">
                     <ShieldCheck className="mr-1 h-3 w-3" /> enrolled
                   </Badge>
+                  {(() => {
+                    const p = programById(student.program);
+                    return p.id !== 'ba' ? (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        {p.emoji} {p.name}
+                      </Badge>
+                    ) : null;
+                  })()}
                 </div>
                 <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1"><CalendarDays className="h-3 w-3" /> enrolled {new Date(student.createdAt).toLocaleDateString()}</span>
@@ -237,7 +257,7 @@ export function SettingsView() {
                   <label htmlFor="gh-repo" className="text-xs font-medium text-muted-foreground">Private repo name</label>
                   <Input
                     id="gh-repo"
-                    placeholder="ba-coach-progress"
+                    placeholder={defaultRepo}
                     value={repoName}
                     onChange={e => setRepoName(e.target.value)}
                   />
@@ -337,8 +357,74 @@ export function SettingsView() {
   );
 }
 
-/** career level snapshot — mirrors the level journey from Learning Tracks */
+/** progress snapshot — BA career levels, or the student's own programme course */
 function CareerLevelRow() {
+  const program = useAppStore(s => s.student?.program);
+  if (program === 'english' || program === 'hrbp') return <ProgramCourseRow programId={program} />;
+  return <BACareerLevelRow />;
+}
+
+/** programme course progress — mirrors the programme curriculum levels */
+function ProgramCourseRow({ programId }: { programId: 'english' | 'hrbp' }) {
+  const progressMap = useAppStore(s => s.progressMap);
+  const setView = useAppStore(s => s.setView);
+  const info = programById(programId);
+  const levels = useMemo(
+    () => getProgramCurriculum(programId) || [],
+    [programId]
+  );
+  const rows = levels.map(lv => {
+    let total = 0;
+    let done = 0;
+    lv.units.forEach(u =>
+      u.lessons.forEach(l => {
+        total += 1;
+        if (progressMap[l.id]) done += 1;
+      })
+    );
+    return { id: lv.id, name: lv.name, done, total, pct: total ? (done / total) * 100 : 0 };
+  });
+  const overallDone = rows.reduce((n, r) => n + r.done, 0);
+  const overallTotal = rows.reduce((n, r) => n + r.total, 0);
+  const overallPct = overallTotal ? (overallDone / overallTotal) * 100 : 0;
+
+  return (
+    <div className="mt-5 rounded-xl border border-border/60 bg-muted/30 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="text-lg leading-none">{info.emoji}</span>
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Course progress</div>
+            <div className="text-sm font-semibold">
+              {info.name} · {info.tagline}
+              <span className="ml-2 text-primary">{Math.round(overallPct)}%</span>
+            </div>
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setView('learn')}>
+          Continue the course
+        </Button>
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {rows.map(r => (
+          <div key={r.id} className="rounded-lg border border-border/50 p-2.5">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold">
+              <span className="text-muted-foreground">{r.name}</span>
+              <span className="ml-auto tabular-nums text-muted-foreground">{Math.round(r.pct)}%</span>
+            </div>
+            <Progress value={r.pct} className="mt-1.5 h-1" />
+            <div className="mt-1 text-[10px] text-muted-foreground">
+              {r.done === 0 ? 'Not started' : r.done === r.total ? 'Completed' : `${r.done}/${r.total} lessons`}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** BA career level snapshot — mirrors the level journey from Learning Tracks */
+function BACareerLevelRow() {
   const progressMap = useAppStore(s => s.progressMap);
   const setView = useAppStore(s => s.setView);
   const career = computeCareerProgress(progressMap);
@@ -484,7 +570,9 @@ function AiProviderSection() {
       setBaseUrl('');
       setModel('');
     }
-    setApiKey('');
+    // key-less presets get a placeholder credential so the saved override
+    // (which requires baseUrl+key+model) validates — the endpoint ignores it
+    setApiKey(preset && preset.needsKey === false ? 'free' : '');
   };
 
   const preset = getPreset(selected);

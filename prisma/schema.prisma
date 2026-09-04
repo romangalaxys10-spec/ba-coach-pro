@@ -11,6 +11,7 @@ model Student {
   id             String   @id @default(cuid())
   name           String
   token          String   @unique // BAC-XXXX-XXXX-XXXX-XXXX secret login token
+  program        String   @default("ba") // ba | english | hrbp — chosen at enrolment
   createdAt      DateTime @default(now())
   lastActiveAt   DateTime @default(now())
   // GitHub pairing (PaT + repo) — enables personal cloud backup & real-time sync

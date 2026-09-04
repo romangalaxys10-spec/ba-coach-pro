@@ -35,6 +35,7 @@ export type AuthedStudent = {
   id: string;
   name: string;
   token: string;
+  program: string; // 'ba' | 'english' | 'hrbp' — chosen at enrolment
   createdAt: Date;
   lastActiveAt: Date;
   githubRepo: string | null;
@@ -68,6 +69,7 @@ export async function getAuthedStudent(req: NextRequest): Promise<AuthedStudent 
     id: student.id,
     name: student.name,
     token: student.token,
+    program: student.program,
     createdAt: student.createdAt,
     lastActiveAt: student.lastActiveAt,
     githubRepo: student.githubRepo,

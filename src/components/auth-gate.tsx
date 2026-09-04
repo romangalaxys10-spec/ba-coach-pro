@@ -5,6 +5,7 @@ import { useAppStore } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { PROGRAM_CATALOG, type ProgramId } from '@/lib/programs';
 import {
   GraduationCap,
   KeyRound,
@@ -35,18 +36,19 @@ export function AuthGate() {
 
   const [mode, setMode] = useState<'register' | 'login'>('register');
   const [name, setName] = useState('');
+  const [program, setProgram] = useState<ProgramId>('ba');
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   if (justRegistered && student) {
-    return <IntroCard name={student.name} token={freshToken} />;
+    return <IntroCard name={student.name} program={student.program} token={freshToken} />;
   }
 
   const submit = async () => {
     setError('');
     setBusy(true);
-    const res = mode === 'register' ? await register(name) : await login(token);
+    const res = mode === 'register' ? await register(name, program) : await login(token);
     setBusy(false);
     if (!res.ok) setError(res.error || 'Something went wrong');
   };
@@ -140,8 +142,35 @@ export function AuthGate() {
                 <div className="space-y-1.5">
                   <h3 className="text-lg font-semibold">Create your student record</h3>
                   <p className="text-sm text-muted-foreground">
-                    Enter your name — we&apos;ll issue you a personal secret token that unlocks your
-                    progress from any device, forever.
+                    Pick your education programme, enter your name — we&apos;ll issue you a personal
+                    secret token that unlocks your progress from any device, forever.
+                  </p>
+                </div>
+                {/* ---- programme selection: BA / English / HRBP-L&D ---- */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground">Your programme</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {PROGRAM_CATALOG.map(p => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setProgram(p.id)}
+                        className={cn(
+                          'flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition',
+                          program === p.id
+                            ? 'border-primary/60 bg-primary/5 ring-2 ring-primary/25'
+                            : 'border-border/60 bg-muted/30 hover:border-primary/40'
+                        )}
+                        aria-pressed={program === p.id}
+                      >
+                        <span className="text-base leading-none">{p.emoji}</span>
+                        <span className="text-xs font-semibold leading-tight">{p.name}</span>
+                        <span className="text-[10px] leading-snug text-muted-foreground">{p.tagline}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    {PROGRAM_CATALOG.find(p => p.id === program)?.description}
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -208,9 +237,10 @@ export function AuthGate() {
 /* Intro card shown right after registration: name + secret token      */
 /* ------------------------------------------------------------------ */
 
-function IntroCard({ name, token }: { name: string; token: string }) {
+function IntroCard({ name, program, token }: { name: string; program?: string; token: string }) {
   const dismiss = useAppStore(s => s.dismissIntroCard);
   const [copied, setCopied] = useState(false);
+  const chosen = PROGRAM_CATALOG.find(p => p.id === program);
 
   const copy = async () => {
     try {
@@ -244,6 +274,14 @@ function IntroCard({ name, token }: { name: string; token: string }) {
           </div>
 
           <dl className="space-y-4">
+            {chosen && (
+              <div className="rounded-xl border border-border/60 bg-muted/40 p-4">
+                <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Programme</dt>
+                <dd className="mt-1 flex items-center gap-2 text-lg font-semibold">
+                  <span>{chosen.emoji}</span> {chosen.name}
+                </dd>
+              </div>
+            )}
             <div className="rounded-xl border border-border/60 bg-muted/40 p-4">
               <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Student name</dt>
               <dd className="mt-1 flex items-center gap-2 text-lg font-semibold">

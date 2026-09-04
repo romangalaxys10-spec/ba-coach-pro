@@ -17,7 +17,7 @@ import {
   persistDiscoveryInHealth,
 } from '@/lib/provider-runtime';
 
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 /**
  * GET /api/ai-provider — masked provider state + discovery health + saved-model
@@ -91,11 +91,18 @@ export async function PUT(req: NextRequest) {
     }
 
     // Key: empty → keep the stored one so students can change models without re-pasting
-    const apiKey = (body.apiKey || '').trim() || student.aiApiKey || '';
-    if (!apiKey) {
+    const pastedKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+    const storedKey = typeof student.aiApiKey === 'string' ? student.aiApiKey : '';
+    let apiKey = pastedKey || storedKey;
+    const localEndpoint = /\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(baseUrl);
+    if (!preset.needsKey) {
+      // key-less providers (e.g. the Free AI pool): use only a freshly pasted
+      // optional key (Pollinations tier key) — never forward a stored key that
+      // may belong to a different provider
+      apiKey = pastedKey || 'free';
+    } else if (!apiKey) {
       return NextResponse.json({ error: 'API key is required.' }, { status: 400 });
-    }
-    if (apiKey.length < 8 || apiKey.length > 400) {
+    } else if (apiKey.length > 400 || (apiKey.length < 8 && !localEndpoint)) {
       return NextResponse.json({ error: 'That API key length looks wrong — please double-check it.' }, { status: 400 });
     }
 
@@ -115,85 +122,118 @@ export async function PUT(req: NextRequest) {
     const adapter = getAdapter(preset.id);
     const providerName = providerDisplayName(preset.id);
 
-    // 1) authoritative model discovery (also classifies authentication)
-    const discovery = await discoverModels(cfg, { force: true });
-    await persistDiscoveryInHealth(student.id, discovery);
-
-    if (discovery.status === 'authentication_failed') {
-      return NextResponse.json({
-        ok: true,
-        saved: true,
-        provider: publicProviderState(await db.student.findUnique({ where: { id: student.id } })),
-        discovery,
-        savedModel: { id: model, state: 'unknown', message: 'Not verified — authentication failed.' },
-        error: discovery.message,
-      });
-    }
-    if (discovery.status === 'provider_unreachable') {
-      return NextResponse.json({
-        ok: true,
-        saved: true,
-        provider: publicProviderState(await db.student.findUnique({ where: { id: student.id } })),
-        discovery,
-        savedModel: { id: model, state: 'unknown', message: 'Not verified — provider unreachable.' },
-        error: discovery.message,
-      });
-    }
-
-    // 2) if the provider exposes no model list, confirm credentials via live probe
-    if (!discovery.models.length) {
-      const cred = await adapter.validateCredentials(cfg);
-      if (!cred.ok && cred.status === 'authentication_failed') {
-        return NextResponse.json({
-          ok: true,
-          saved: true,
-          provider: publicProviderState(await db.student.findUnique({ where: { id: student.id } })),
-          discovery,
-          savedModel: { id: model, state: 'unknown', message: 'Not verified — authentication failed.' },
-          error: cred.message,
-        });
+    // The config is already saved above. Everything below is best-effort
+    // verification, wrapped in ONE wall-clock budget: a slow provider or a
+    // slow GitHub-backed DB write must never keep this request past the
+    // platform's response window (that kills the function and the browser
+    // shows "server sent an invalid response").
+    const withBudget = async <T>(p: Promise<T>, ms: number): Promise<T | null> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms); });
+      try {
+        return await Promise.race([p, timeout]);
+      } finally {
+        if (timer) clearTimeout(timer);
       }
-    }
+    };
+    const savedState = async () => publicProviderState(await db.student.findUnique({ where: { id: student.id } }));
 
-    // 3) validate the chosen model against the CURRENT discovered list
-    const probe = await adapter.validateModel(cfg, model, discovery.models.length ? discovery.models : undefined);
+    const verification = (async () => {
+      // 1) authoritative model discovery (also classifies authentication)
+      const discovery = await (async () => {
+        const d = await discoverModels(cfg, { force: true });
+        await persistDiscoveryInHealth(student.id, d);
+        return d;
+      })();
 
-    let notice: string | undefined;
-    let savedModelState: SavedModelState = { id: model, state: probe.availability, message: probe.message };
+      if (discovery.status === 'authentication_failed') {
+        return {
+          ok: true, saved: true, provider: await savedState(), discovery,
+          savedModel: { id: model, state: 'unknown' as const, message: 'Not verified — authentication failed.' },
+          error: discovery.message,
+        };
+      }
+      if (discovery.status === 'provider_unreachable') {
+        return {
+          ok: true, saved: true, provider: await savedState(), discovery,
+          savedModel: { id: model, state: 'unknown' as const, message: 'Not verified — provider unreachable.' },
+          error: discovery.message,
+        };
+      }
 
-    if (probe.ok && probe.availability === 'available') {
-      await db.student.update({ where: { id: student.id }, data: { aiVerifiedAt: new Date() } });
-    } else if (probe.availability === 'retired' || probe.availability === 'unavailable') {
-      // definitive lifecycle event — mark, invalidate, refresh, notify
-      await markModelUnavailable(student.id, model, probe.availability === 'retired' ? 'retired' : 'unavailable', probe.endOfLife ? 410 : undefined);
-      const refreshed = await discoverModels(cfg, { force: true });
-      await persistDiscoveryInHealth(student.id, refreshed);
-      notice =
-        probe.availability === 'retired'
-          ? `Model ${model} is no longer available from ${providerName}. The available model list has been refreshed.`
-          : `Model ${model} is not available for this endpoint/account. The available model list has been refreshed.`;
-      savedModelState = {
-        id: model,
-        state: probe.availability,
-        message: notice,
+      // 2) if the provider exposes no model list, confirm credentials via live probe
+      if (!discovery.models.length) {
+        const cred = await withBudget(adapter.validateCredentials(cfg), 15_000);
+        if (cred && !cred.ok && cred.status === 'authentication_failed') {
+          return {
+            ok: true, saved: true, provider: await savedState(), discovery,
+            savedModel: { id: model, state: 'unknown' as const, message: 'Not verified — authentication failed.' },
+            error: cred.message,
+          };
+        }
+      }
+
+      // 3) validate the chosen model against the CURRENT discovered list
+      const probe = (await withBudget(
+        adapter.validateModel(cfg, model, discovery.models.length ? discovery.models : undefined),
+        20_000
+      )) ?? {
+        ok: false,
+        availability: 'unknown' as const,
+        message: 'Verification timed out — model availability could not be checked.',
       };
-      return NextResponse.json({
-        ok: true,
-        saved: true,
-        provider: publicProviderState(await db.student.findUnique({ where: { id: student.id } })),
-        discovery: refreshed,
-        savedModel: savedModelState,
-        notice,
-      });
-    }
 
+      if (probe.ok && probe.availability === 'available') {
+        await db.student.update({ where: { id: student.id }, data: { aiVerifiedAt: new Date() } });
+        return {
+          ok: true, saved: true, provider: await savedState(), discovery,
+          savedModel: { id: model, state: probe.availability, message: probe.message },
+        };
+      }
+
+      if (probe.availability === 'retired' || probe.availability === 'unavailable') {
+        // definitive lifecycle event — mark, invalidate, refresh, notify
+        await markModelUnavailable(student.id, model, probe.availability === 'retired' ? 'retired' : 'unavailable', probe.endOfLife ? 410 : undefined);
+        const refreshed = await discoverModels(cfg, { force: true });
+        await persistDiscoveryInHealth(student.id, refreshed);
+        const notice =
+          probe.availability === 'retired'
+            ? `Model ${model} is no longer available from ${providerName}. The available model list has been refreshed.`
+            : `Model ${model} is not available for this endpoint/account. The available model list has been refreshed.`;
+        return {
+          ok: true, saved: true, provider: await savedState(), discovery: refreshed,
+          savedModel: { id: model, state: probe.availability, message: notice },
+          notice,
+        };
+      }
+
+      return {
+        ok: true, saved: true, provider: await savedState(), discovery,
+        savedModel: { id: model, state: probe.availability, message: probe.message },
+      };
+    })();
+
+    const verified = await withBudget(verification, 45_000);
+    if (verified) return NextResponse.json(verified);
+
+    // Budget blown — the config IS saved; report it as saved-but-unverified
+    // instead of letting the platform kill the function mid-flight. (Any
+    // still-running verification work after the response is best-effort and
+    // idempotent: it only refreshes cached model lists / verification stamps.)
+    const provider = await withBudget(savedState(), 8_000);
     return NextResponse.json({
       ok: true,
       saved: true,
-      provider: publicProviderState(await db.student.findUnique({ where: { id: student.id } })),
-      discovery,
-      savedModel: savedModelState,
-      notice,
+      ...(provider ? { provider } : {}),
+      discovery: {
+        status: 'provider_unreachable' as const,
+        message: 'Verification timed out — the provider did not respond in time.',
+        models: [],
+        count: 0,
+        fetchedAt: null,
+      },
+      savedModel: { id: model, state: 'unknown' as const, message: 'Not verified — verification exceeded the time budget.' },
+      notice: `Config saved. ${providerName} verification is taking unusually long — you can try chatting now and check the provider status again in a moment.`,
     });
   } catch (error) {
     console.error('[/api/ai-provider PUT] error:', error);

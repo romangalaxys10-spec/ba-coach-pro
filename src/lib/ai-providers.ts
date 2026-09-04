@@ -49,63 +49,73 @@ export const AI_PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'nvidia-nim',
     name: 'NVIDIA NIM',
     emoji: '🟩',
-    tagline: 'build.nvidia.com free-tier key — Llama, DeepSeek, Nemotron, Qwen',
+    tagline: 'build.nvidia.com key — Nemotron Nano, Mistral, Gemma, Llama',
     signupUrl: 'https://build.nvidia.com/explore',
     baseUrl: 'https://integrate.api.nvidia.com/v1',
     models: [
-      'deepseek-ai/deepseek-v4-flash-0731',
-      'openai/gpt-oss-20b',
       'nvidia/nemotron-3.5-lightning-30b-a3b',
-      'nvidia/nemotron-nano-3-30b-a3b',
-      'google/gemma-3-4b-it',
-      'nv-mistralai/mistral-nemo-12b-instruct',
-      'moonshotai/kimi-k3',
-      'nvidia/nemotron-3-ultra-550b-a55b',
+      'meta/llama-3.2-11b-vision-instruct',
+      'google/gemma-4-31b-it',
+      'deepseek-ai/deepseek-v4-flash-0731',
     ],
-    defaultModel: 'deepseek-ai/deepseek-v4-flash-0731',
-    keyHint: 'Paste your nvapi-… key',
+    defaultModel: 'nvidia/nemotron-3.5-lightning-30b-a3b',
+    keyHint: 'Paste your nvapi-… key from build.nvidia.com',
     needsKey: true,
     freeTier: true,
     fastModels: true,
-    note: 'Free API credits from build.nvidia.com. Keys start with nvapi-. All models are auto-fetched and ranked by speed — the fastest 10 are suggested, and "Measure real speed" benchmarks them live with your key.',
+    note: 'Free 1,000 API credits from build.nvidia.com. Keys start with nvapi-. IMPORTANT: free-tier keys can only call a subset of models — Nemotron Lightning and Llama 3.2 are verified working; some catalogue models (Nano 3, Mistral 7B, Gemma 3) return 404 on free accounts. Press "Measure real speed" to benchmark what YOUR key can actually call, fastest-first.',
+  },
+  {
+    id: 'pollinations-free',
+    name: 'Free AI (no key)',
+    emoji: '🆓',
+    tagline: 'Pollinations open pool — zero setup, zero cost',
+    signupUrl: 'https://enter.pollinations.ai',
+    baseUrl: 'https://text.pollinations.ai/openai',
+    models: ['openai', 'openai-fast'],
+    defaultModel: 'openai',
+    keyHint: 'No key needed — leave empty (paste an optional enter.pollinations.ai key to remove limits)',
+    needsKey: false,
+    freeTier: true,
+    note: 'The key-less community AI pool (no signup, no card): only the "openai" and "openai-fast" models are available anonymously, and traffic is rate-limited. A key from enter.pollinations.ai removes the limits and unlocks 40+ models (the app automatically switches to the modern keyed API when a key is pasted). For guaranteed-free chats, NVIDIA NIM gives 1,000 credits with a free key.',
   },
   {
     id: 'opencode-zen',
     name: 'OpenCode Zen',
     emoji: '🔵',
-    tagline: 'opencode.ai tested & verified models — free coding models included',
+    tagline: 'opencode.ai curated gateway — free models with a free key',
     signupUrl: 'https://opencode.ai/auth',
     baseUrl: 'https://opencode.ai/zen/v1',
-    models: ['code-supernova', 'grok-code', 'kimi-k2.7', 'gemini-3.8-flash', 'claude-opus-5'],
-    defaultModel: 'code-supernova',
+    models: ['gemini-3.8-flash', 'claude-haiku-4-5', 'gpt-5.6-luna', 'gpt-5.5', 'gemini-3.5-flash', 'claude-sonnet-4-5'],
+    defaultModel: 'gemini-3.8-flash',
     keyHint: 'Paste your OpenCode Zen API key',
     needsKey: true,
     freeTier: true,
     fastModels: true,
-    note: 'Zen is the OpenCode team’s curated model gateway — OpenAI-compatible at /zen/v1. The full live model list is fetched automatically and ranked fastest-first.',
+    note: 'Zen is the OpenCode team’s curated model gateway — OpenAI-compatible at /zen/v1. The model list is public (66+ models) but chat requires a free key from opencode.ai/auth — code-supernova and grok-code were retired in 2026. The full live model list is fetched automatically and ranked fastest-first.',
   },
   {
     id: 'openadapter',
     name: 'OpenAdapter',
     emoji: '🟠',
-    tagline: 'openadapter.dev — one key, 79+ models across 15+ providers',
+    tagline: 'openadapter.dev — one key, SOTA models across 15+ providers',
     signupUrl: 'https://openadapter.dev',
     baseUrl: 'https://api.openadapter.dev/v1',
     models: [
-      'gpt-4o-mini',
-      'gpt-4.1-mini',
-      'gemini-2.5-flash',
-      'deepseek-chat',
-      'claude-haiku-4-5',
-      'claude-sonnet-4-5',
-      'gpt-4o',
-      'llama-3.3-70b-instruct',
+      'Qwen3.8-Flash',
+      'DeepSeek-V4-Flash',
+      'GLM-5.1',
+      'GPT-5.6-Luna',
+      'Kimi-K2.6',
+      'gemma-4-31b-it',
+      'MiniMax-M3',
     ],
-    defaultModel: 'gpt-4o-mini',
+    defaultModel: 'Qwen3.8-Flash',
     keyHint: 'Paste your OpenAdapter API key',
     needsKey: true,
+    freeTier: true,
     fastModels: true,
-    note: 'One key, every upstream provider. Paste your key and press "Measure real speed" — all models OpenAdapter exposes for your account are fetched, ranked by real tokens/sec, and the fastest 10 are suggested. Model ids vary per upstream provider; type any id your plan supports.',
+    note: 'One key, every upstream provider. Their /models endpoint requires a key — until you paste one, the list below shows BUILT-IN suggestions (current as of Sep 2026), not a live fetch. With a key, "Measure real speed" benchmarks what your account can actually call, fastest-first. Model ids are case-sensitive (e.g. Qwen3.8-Flash).',
   },
   {
     id: 'custom',
@@ -188,6 +198,7 @@ export function getPreset(id: string | null | undefined): ProviderPreset | null 
 export function maskKey(key: string | null | undefined): string | null {
   if (!key) return null;
   const k = key.trim();
+  if (k === 'free' || k === 'none') return 'none (free tier)';
   if (k.length <= 8) return '••••';
   return `${k.slice(0, 4)}••••${k.slice(-4)}`;
 }
@@ -196,7 +207,9 @@ export function maskKey(key: string | null | undefined): string | null {
  * Normalize / sanity-check a base URL coming from a student:
  *  - trim, drop trailing slash
  *  - accept a full .../chat/completions paste and reduce it to the base
- *  - require http(s); plain http only for localhost / 127.0.0.1 / [::1]
+ *  - require https; plain http and private/loopback hosts only when the
+ *    deployment opted in via ALLOW_LOCAL_AI_ENDPOINTS=1 (local Ollama /
+ *    LM Studio on self-hosts)
  * Returns null when the URL is unusable.
  */
 export function sanitizeBaseUrl(raw: string): string | null {
@@ -204,17 +217,67 @@ export function sanitizeBaseUrl(raw: string): string | null {
   if (!u) return null;
   u = u.replace(/\/chat\/completions\/?$/i, '');
   u = u.replace(/\/+$/, '');
+  // Seamless migration: auto-upgrade deprecated legacy text.pollinations.ai to gen.pollinations.ai/v1
+  if (/text\.pollinations\.ai/i.test(u)) {
+    u = 'https://gen.pollinations.ai/v1';
+  }
   if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
+  const allowLocal = process.env.ALLOW_LOCAL_AI_ENDPOINTS === '1';
   try {
     const parsed = new URL(u);
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
-    const host = parsed.hostname;
-    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '0.0.0.0';
-    if (parsed.protocol === 'http:' && !isLocal) return null;
+    if (parsed.username || parsed.password) return null; // no embedded credentials
+    if (parsed.search || parsed.hash) return null; // a base URL needs no query/fragment
+    let host = parsed.hostname.toLowerCase().replace(/\.+$/, ''); // no trailing-dot tricks
+    const isPrivate = privateHostCheck(host);
+    if (isPrivate && !allowLocal) return null;
+    if (parsed.protocol === 'http:' && !allowLocal) return null;
     return u;
   } catch {
     return null;
   }
+}
+
+/**
+ * True for loopback / private-network hosts in ANY notation we can detect
+ * (canonical IPv4 RFC1918 + loopback, alternate-encoding IPv4, IPv6 loopback
+ * and ULA, .internal/.local names). DNS rebinding (public name → private IP)
+ * is re-checked at fetch time by the same rules via guardProviderUrl.
+ */
+export function privateHostCheck(rawHost: string): boolean {
+  const host = rawHost.toLowerCase().replace(/\.+$/, '');
+  if (host.endsWith(']')) {
+    // IPv6 literal — only ::1/loopback forms are recognised as local; every
+    // other IPv6 (incl. fc00::/7 ULA and fe80::/10 link-local) is private too
+    const v6 = host.replace(/^\[|\]$/g, '');
+    if (v6 === '::1' || v6 === '::') return true;
+    if (/^f[cd]/.test(v6) || /^fe[89ab]/.test(v6)) return true;
+    return false;
+  }
+  if (/^0x[0-9a-f]+$/i.test(host) || /^\d+$/.test(host) || /0\d/.test(host)) {
+    // non-canonical IPv4 encodings (hex, decimal, octal) — reject outright
+    return true;
+  }
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    const octets = host.split('.').map(Number);
+    if (octets.some(o => o > 255)) return true;
+    const [a, b] = octets;
+    if (a === 127 || a === 10 || a === 0 || a === 169 || a === 100 || a === 198 || a === 192) {
+      if (a === 192 && b !== 168) return false; // 192.0.x etc. is public
+      if (a === 198 && !(b === 18 || b === 19)) return false; // benchmark range only
+      return true; // 127/8, 10/8, 0/8, 169.254, 100.64/10, 198.18/15, 192.168
+    }
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    return false;
+  }
+  return (
+    host === 'localhost' ||
+    host === 'metadata' ||
+    host === 'metadata.google.internal' ||
+    host.endsWith('.internal') ||
+    host.endsWith('.local') ||
+    host.endsWith('.localhost')
+  );
 }
 
 /**

@@ -22,6 +22,19 @@ import { db } from '@/lib/db';
 
 const GH_API = 'https://api.github.com';
 
+/**
+ * GitHub naming rules, enforced before any owner/repo is interpolated into an
+ * API URL — pairing input and stored values must never be able to reshape the
+ * request path (traversal / URL injection).
+ */
+const GH_OWNER_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
+const GH_REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/;
+
+export function assertSafeRepoRef(owner: string, repo: string): void {
+  if (!GH_OWNER_RE.test(owner)) throw new Error(`Invalid GitHub owner: ${owner.slice(0, 40)}`);
+  if (!GH_REPO_RE.test(repo)) throw new Error(`Invalid GitHub repo name: ${repo.slice(0, 40)}`);
+}
+
 export interface GitHubIdentity {
   login: string;
   token: string;
@@ -61,7 +74,8 @@ export async function ensurePrivateRepo(
   repoName: string
 ): Promise<{ ok: boolean; created: boolean; error?: string }> {
   try {
-    const check = await ghFetch(`${GH_API}/repos/${owner}/${repoName}`, token);
+    assertSafeRepoRef(owner, repoName);
+    const check = await ghFetch(`${GH_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}`, token);
     if (check.ok) return { ok: true, created: false };
 
     const res = await ghFetch(`${GH_API}/user/repos`, token, {
@@ -94,12 +108,13 @@ async function putFile(
   message: string
 ): Promise<void> {
   let sha: string | undefined;
-  const existing = await ghFetch(`${GH_API}/repos/${owner}/${repo}/contents/${encodeURI(path)}`, token);
+  assertSafeRepoRef(owner, repo);
+  const existing = await ghFetch(`${GH_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeURI(path)}`, token);
   if (existing.ok) {
     const data = (await existing.json()) as { sha?: string };
     sha = data.sha;
   }
-  const res = await ghFetch(`${GH_API}/repos/${owner}/${repo}/contents/${encodeURI(path)}`, token, {
+  const res = await ghFetch(`${GH_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeURI(path)}`, token, {
     method: 'PUT',
     body: JSON.stringify({
       message,
@@ -334,8 +349,9 @@ export async function restoreStudentFromGitHub(
     if (!student?.githubToken || !student.githubOwner || !student.githubRepo) {
       return { ok: false, error: 'GitHub not paired' };
     }
+    assertSafeRepoRef(student.githubOwner, student.githubRepo);
     const res = await ghFetch(
-      `${GH_API}/repos/${student.githubOwner}/${student.githubRepo}/contents/export/ba-coach-export.json`,
+      `${GH_API}/repos/${encodeURIComponent(student.githubOwner)}/${encodeURIComponent(student.githubRepo)}/contents/export/ba-coach-export.json`,
       student.githubToken
     );
     if (!res.ok) return { ok: false, error: `Cannot read export file (${res.status})` };

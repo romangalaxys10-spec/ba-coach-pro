@@ -17,6 +17,9 @@
  *     — direct OpenAI-compatible calls (LLM only). Works on any host.
  *  3. `z-ai-web-dev-sdk` — reads the standard .z-ai-config file chain. Works in
  *     the Z.ai dev sandbox and self-hosted environments that provide one.
+ *  4. FREE key-less pool (text.pollinations.ai/openai) — zero-config public AI
+ *     so a fresh deployment has working AI out of the box. Best-effort: the
+ *     anonymous tier is rate-limited; set POLLINATIONS_API_KEY to lift limits.
  *
  * TTS/ASR always use modes 1–3 (custom providers are OpenAI LLM endpoints).
  *
@@ -25,6 +28,7 @@
  */
 
 import { TTS_VOICES } from '@/lib/audio';
+import { privateHostCheck } from '@/lib/ai-providers';
 
 export interface ChatMsg {
   role: string;
@@ -34,17 +38,48 @@ export interface ChatMsg {
 const envTunnelUrl = () => (process.env.AI_TUNNEL_URL || '').replace(/\/$/, '');
 const envTunnelKey = () => process.env.AI_TUNNEL_KEY || '';
 const ENV_KEY = process.env.ZAI_API_KEY || '';
-const ENV_BASE = (process.env.ZAI_BASE_URL || 'https://api.z.ai/api/paas/v4').replace(/\/$/, '');
 
-export function aiMode(): 'tunnel' | 'env-key' | 'sdk' {
-  return envTunnelUrl() ? 'tunnel' : ENV_KEY ? 'env-key' : 'sdk';
+// ZAI_CONFIG_JSON — single-secret alternative: {"apiKey":"…","baseUrl":"…","model":"…"}
+let cfgJsonKey = '';
+let cfgJsonBase = '';
+let cfgJsonModel = '';
+try {
+  const raw = process.env.ZAI_CONFIG_JSON || '';
+  if (raw) {
+    const j = JSON.parse(raw) as { apiKey?: unknown; key?: unknown; baseUrl?: unknown; model?: unknown };
+    cfgJsonKey = typeof j.apiKey === 'string' ? j.apiKey.trim() : typeof j.key === 'string' ? j.key.trim() : '';
+    cfgJsonBase = typeof j.baseUrl === 'string' ? j.baseUrl.trim() : '';
+    cfgJsonModel = typeof j.model === 'string' ? j.model : '';
+    // sanity: placeholder/short keys or non-https bases make the whole
+    // deployment chain fail — ignore them and fall through to the free pool
+    if (cfgJsonKey && (cfgJsonKey.length < 8 || !/^https:\/\//i.test(cfgJsonBase || 'https://x'))) {
+      console.error('[ai] ZAI_CONFIG_JSON ignored — placeholder key or non-https baseUrl');
+      cfgJsonKey = '';
+      cfgJsonBase = '';
+      cfgJsonModel = '';
+    }
+  }
+} catch {
+  // malformed secret — ignore and fall through to the other steps
+}
+
+const ENV_KEY_EFF = ENV_KEY || cfgJsonKey;
+const ENV_BASE_EFF = (cfgJsonBase || process.env.ZAI_BASE_URL || 'https://api.z.ai/api/paas/v4').replace(/\/$/, '');
+const ENV_MODEL_EFF = cfgJsonModel || process.env.ZAI_MODEL || 'glm-4.7';
+
+export function aiMode(): 'tunnel' | 'env-key' | 'sdk' | 'free' {
+  if (envTunnelUrl()) return 'tunnel';
+  if (ENV_KEY_EFF) return 'env-key';
+  // the SDK attempt may still fall through to the free key-less pool at call time
+  return 'sdk';
 }
 
 export const NOT_CONFIGURED_MSG =
-  '🤖 **AI coaching is not configured on this deployment.**\n\n' +
-  'Everything else (student accounts, GitHub backups, templates, progress) works — to light up live AI, either:\n' +
-  '1. **AI tunnel (no key needed)** — set `AI_TUNNEL_URL` to a running Z.ai sandbox instance of this app (e.g. `https://preview-<id>.space-z.ai`), so model calls are proxied to its internal GLM-5 models; or\n' +
-  '2. **Direct API key** — set `ZAI_API_KEY` (+ optional `ZAI_BASE_URL`, default `https://api.z.ai/api/paas/v4`) in your hosting environment.\n\n' +
+  '🤖 **AI is not reachable on this deployment right now.**\n\n' +
+  'Everything else (student accounts, GitHub backups, templates, progress) works. The free key-less AI pool was tried but is busy/rate-limited. To restore AI:\n' +
+  '1. **Free pool key** — set `POLLINATIONS_API_KEY` from https://enter.pollinations.ai (cheap, removes the free-tier limits); or\n' +
+  '2. **Direct API key** — set `ZAI_API_KEY` (+ optional `ZAI_BASE_URL`, default `https://api.z.ai/api/paas/v4`) in your hosting environment; or\n' +
+  '3. **Your own provider** — every student can plug an OpenAI-compatible key in Settings → AI provider (NVIDIA NIM and OpenCode Zen have free tiers).\n\n' +
   'Self-hosted instances inside the Z.ai sandbox work out of the box.';
 
 /* ------------------------------------------------------------------ */
@@ -118,6 +153,59 @@ export class ProviderHttpError extends Error {
 }
 
 const isZaiHost = (base: string) => /(^|\.)z\.ai($|:|\/)/i.test(base);
+const isPollinationsHost = (base: string) => /(^|\.)pollinations\.ai($|:|\/)/i.test(base);
+
+/**
+ * SSRF guard for server-side provider calls. Students configure arbitrary
+ * base URLs, so before dialling we reject hosts that must never be reached
+ * from the server: cloud metadata, link-local, RFC1918 and loopback ranges.
+ * Local dev endpoints (Ollama / LM Studio on localhost, or a LAN box) are
+ * opt-in per deployment: set ALLOW_LOCAL_AI_ENDPOINTS=1 to allow them.
+ */
+export function guardProviderUrl(base: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(base);
+  } catch {
+    throw new Error(`Invalid provider URL: ${base}`);
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`Provider URL must be http(s): ${base}`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('Blocked provider URL (embedded credentials not allowed)');
+  }
+  const host = parsed.hostname.toLowerCase();
+  const allowLocal = process.env.ALLOW_LOCAL_AI_ENDPOINTS === '1';
+  if (privateHostCheck(host)) {
+    if (!allowLocal) {
+      throw new Error(
+        `Blocked provider URL (${host} is a private/loopback host). Self-hosters can allow local AI endpoints with ALLOW_LOCAL_AI_ENDPOINTS=1.`
+      );
+    }
+    if (/^169\.254\./.test(host) || host === 'metadata.google.internal') {
+      // the one private range that stays forbidden even when locals are allowed
+      throw new Error(`Blocked provider URL (metadata host not allowed): ${host}`);
+    }
+  }
+  return base;
+}
+
+/**
+ * Extract the user-facing answer from an OpenAI-shaped chat response.
+ * Handles reasoning models: `reasoning_content` (DeepSeek style), `reasoning`
+ * (Pollinations style) and <think>…</think> wrappers.
+ */
+function parseOpenAIChoice(data: {
+  choices?: { message?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null } }[];
+}): string {
+  const msg = data.choices?.[0]?.message;
+  const raw = msg?.content ?? '';
+  // Reasoning models sometimes put the whole answer (or a preamble) inside
+  // <think>…</think>; the user-facing answer is what comes after the tags.
+  const stripped = raw.includes('</think>') ? raw.split('</think>').pop()! : raw;
+  return stripped.trim() || (msg?.reasoning_content ?? '').trim() || (msg?.reasoning ?? '').trim();
+}
 
 /** One OpenAI chat/completions call against an arbitrary compatible base URL. */
 async function callViaOpenAI(
@@ -128,19 +216,48 @@ async function callViaOpenAI(
   timeoutMs = 180_000,
   extra?: Record<string, unknown>
 ): Promise<string> {
+  // Pollinations has two APIs: the legacy text.pollinations.ai/openai works
+  // ANONYMOUSLY (with a referrer) but rejects authenticated callers with 402
+  // deprecation; gen.pollinations.ai/v1 is the modern API but REQUIRES a key
+  // (401 without one). Route by credential: real key → gen.*, keyless → legacy.
+  let cleanBase = base;
+  const hasRealKey = Boolean(apiKey && apiKey !== 'free');
+  const isGenHost = /gen\.pollinations\.ai/i.test(cleanBase);
+  const isLegacyHost = /text\.pollinations\.ai/i.test(cleanBase);
+  if (isLegacyHost && hasRealKey) {
+    // real key → modern API
+    cleanBase = 'https://gen.pollinations.ai/v1';
+  } else if (isGenHost && !hasRealKey) {
+    // keyless caller on the modern API → legacy anonymous endpoint
+    cleanBase = 'https://text.pollinations.ai/openai';
+  }
+
   // `thinking` is a Z.ai-only extension — other providers reject unknown args.
   const body: Record<string, unknown> = { model, messages };
-  if (isZaiHost(base)) body.thinking = { type: 'disabled' };
+  if (isZaiHost(cleanBase)) body.thinking = { type: 'disabled' };
+  // Pollinations' free anonymous tier is keyed on a referrer; without it the
+  // request is billed as keyless-with-zero-budget and rejected (HTTP 402).
+  if (isPollinationsHost(cleanBase)) body.referrer = body.referrer || 'ba-coach-pro';
   if (extra) Object.assign(body, extra);
+
+  // A base already ending in /openai IS the chat endpoint (Pollinations style);
+  // appending /chat/completions would 404.
+  const url = /\/(chat\/completions|openai)$/.test(cleanBase) ? cleanBase : `${cleanBase}/chat/completions`;
+  guardProviderUrl(url);
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (apiKey && apiKey !== 'free') {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
 
   let res: Response;
   try {
-    res = await fetch(`${base}/chat/completions`, {
+    res = await fetch(url, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
+      redirect: 'error',
+      headers,
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -155,11 +272,9 @@ async function callViaOpenAI(
     const text = (await res.text().catch(() => '')).slice(0, 800);
     throw new ProviderHttpError(res.status, text);
   }
-  const data = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
-  const content = data.choices?.[0]?.message?.content;
-  if (!content || !content.trim()) throw new Error('Empty response from AI model');
+  const data = (await res.json()) as Parameters<typeof parseOpenAIChoice>[0];
+  const content = parseOpenAIChoice(data);
+  if (!content) throw new Error('Empty response from AI model');
   return content;
 }
 
@@ -189,38 +304,141 @@ export async function callLLMCustom(
   return callViaOpenAI(messages, override.baseUrl, override.apiKey, override.model, timeoutMs, extra);
 }
 
+/* ------------------------------------------------------------------ */
+/* Free key-less pool (Pollinations) — final fallback before giving up */
+/* ------------------------------------------------------------------ */
+
+const POLLINATIONS_DEFAULT_URL = 'https://gen.pollinations.ai/v1/chat/completions';
+
+/**
+ * Fixed-infrastructure endpoint for the free key-less pool. Domain-pinned to
+ * pollinations.ai over https (the env override cannot point anywhere else)
+ * — this call is NOT student-configurable, so it stays a closed allowlist
+ * rather than an open URL input.
+ */
+function pollinationsUrl(): string {
+  const raw = (process.env.POLLINATIONS_BASE_URL || '').trim().replace(/\/$/, '');
+  if (raw) {
+    try {
+      const u = new URL(raw.endsWith('/chat/completions') || raw.endsWith('/openai') ? raw : `${raw}/chat/completions`);
+      if (u.protocol === 'https:' && /(^|\.)pollinations\.ai$/i.test(u.hostname)) return u.toString();
+    } catch {
+      /* fall through to default */
+    }
+    console.error('[ai] POLLINATIONS_BASE_URL rejected (must be an https pollinations.ai host) — using default');
+  }
+  return POLLINATIONS_DEFAULT_URL;
+}
+
+const POLLINATIONS_MODEL = process.env.POLLINATIONS_MODEL || 'openai-fast';
+const POLLINATIONS_KEY = process.env.POLLINATIONS_API_KEY || '';
+
+/**
+ * Free, key-less OpenAI-compatible pool (gen.pollinations.ai/v1).
+ * Anonymous traffic is rate-limited and occasionally returns 402 "budget"
+ * errors when the pool is saturated — callers treat this tier as
+ * best-effort, never as the only option.
+ */
+async function callViaPollinations(messages: ChatMsg[]): Promise<string> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await callViaPollinationsOnce(messages);
+    } catch (e) {
+      lastErr = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      // 402/429 carry their own actionable guidance — retrying changes nothing
+      const transient = /unreachable|Fetch failed|timed out|responded 5\d\d/i.test(msg);
+      if (!transient || attempt === 2) break;
+      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('Free AI pool failed');
+}
+
+/**
+ * The free pool is served over a flaky edge (intermittent 502s and undici
+ * "fetch failed" connect resets from serverless runtimes). Retry transient
+ * failures a couple of times with a short backoff; 402/429 are definitive
+ * (pool saturated for this keyless identity) and return their own guidance.
+ */
+async function callViaPollinationsOnce(messages: ChatMsg[]): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(pollinationsUrl(), {
+      method: 'POST',
+      redirect: 'error',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(POLLINATIONS_KEY && POLLINATIONS_KEY !== 'free' ? { Authorization: `Bearer ${POLLINATIONS_KEY}` } : {}),
+      },
+      body: JSON.stringify({ model: POLLINATIONS_MODEL, messages, referrer: 'ba-coach-pro' }),
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (e) {
+    throw new Error(`Free AI pool unreachable (${e instanceof Error ? e.message : String(e)})`);
+  }
+  if (!res.ok) {
+    const text = (await res.text().catch(() => '')).slice(0, 300);
+    if (res.status === 402 || res.status === 429) {
+      throw new Error(
+        'The free AI pool is busy or rate-limited right now (HTTP ' +
+          res.status +
+          '). Set POLLINATIONS_API_KEY (https://enter.pollinations.ai) or configure any AI provider to remove the limits.'
+      );
+    }
+    throw new Error(`Free AI pool responded ${res.status}: ${text}`);
+  }
+  const data = (await res.json()) as Parameters<typeof parseOpenAIChoice>[0];
+  const content = parseOpenAIChoice(data);
+  if (!content) throw new Error('Empty response from the free AI pool');
+  return content;
+}
+
 async function callViaEnvKey(messages: ChatMsg[]): Promise<string> {
   return callViaOpenAI(
     messages,
-    ENV_BASE,
-    ENV_KEY,
-    process.env.ZAI_MODEL || 'glm-4.7'
+    ENV_BASE_EFF,
+    ENV_KEY_EFF,
+    ENV_MODEL_EFF
   );
 }
 
-/** Direct resolution (env key → SDK). Used by the tunnel endpoint itself. */
+/** Direct resolution (env key → SDK → free pool). Used by the tunnel endpoint itself. */
 export async function callLLMDirect(messages: ChatMsg[], retries = 2): Promise<string> {
-  if (ENV_KEY) {
+  if (ENV_KEY_EFF) {
     let lastErr: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         return await callViaEnvKey(messages);
       } catch (e) {
         lastErr = e;
+        if (isDefinitiveModelError(e)) throw e;
         if (attempt < retries) await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
       }
     }
-    throw lastErr instanceof Error ? lastErr : new Error('AI call failed');
+    // the deployment key failed for a non-definitive reason (dead host,
+    // network blip, exhausted quota) — degrade to the free pool instead of
+    // taking the whole platform's AI down with it
+    console.error('[ai] env-key AI failed after retries — falling through to the free pool:', lastErr);
   }
 
   try {
     return await callViaSdk(messages);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/Configuration file not found/i.test(msg)) {
-      throw new Error(NOT_CONFIGURED_MSG);
+  } catch (sdkErr) {
+    // No sandbox SDK config (typical on Vercel/self-host) → try the free
+    // key-less pool so the deployment still has working AI out of the box.
+    try {
+      return await callViaPollinations(messages);
+    } catch (freeErr) {
+      const sdkMsg = sdkErr instanceof Error ? sdkErr.message : String(sdkErr);
+      const freeMsg = freeErr instanceof Error ? freeErr.message : 'AI unavailable';
+      if (/Configuration file not found/i.test(sdkMsg)) {
+        throw freeErr instanceof Error ? freeErr : new Error(NOT_CONFIGURED_MSG);
+      }
+      // SDK existed but its endpoint failed — report both attempts clearly.
+      throw new Error(`Configured AI endpoint failed (${sdkMsg}). ${freeMsg}`);
     }
-    throw e;
   }
 }
 

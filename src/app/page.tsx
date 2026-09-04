@@ -6,10 +6,12 @@ import { AppSidebar } from '@/components/app-sidebar';
 import { ChatView } from '@/components/chat-view';
 import { SkillsLibrary } from '@/components/skills-library';
 import { LearnView } from '@/components/learn-view';
+import { ProgramLearnView } from '@/components/program-learn-view';
 import { PracticeView } from '@/components/practice-view';
 import { TemplatesView } from '@/components/templates-view';
 import { SettingsView } from '@/components/settings-view';
 import { AuthGate } from '@/components/auth-gate';
+import { programById } from '@/lib/programs';
 import { GraduationCap, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -66,14 +68,25 @@ export default function Home() {
             <Menu className="h-5 w-5" />
           </Button>
           <div className="flex items-center gap-1.5 text-sm font-semibold">
-            <GraduationCap className="h-4 w-4 text-primary" /> BA Coach Pro
+            {(() => {
+              const p = programById(student.program);
+              return (
+                <>
+                  {p.id === 'ba' ? <GraduationCap className="h-4 w-4 text-primary" /> : <span>{p.emoji}</span>}
+                  {p.id === 'ba' ? 'BA Coach Pro' : p.name}
+                </>
+              );
+            })()}
           </div>
         </div>
 
         <div className="min-h-0 flex-1">
           {view === 'chat' && <ChatView />}
           {view === 'skills' && <SkillsLibrary />}
-          {view === 'learn' && <LearnView />}
+          {view === 'learn' && (student.program === 'english' || student.program === 'hrbp') && (
+            <ProgramLearnView program={student.program} />
+          )}
+          {view === 'learn' && student.program !== 'english' && student.program !== 'hrbp' && <LearnView />}
           {view === 'practice' && <PracticeView />}
           {view === 'templates' && <TemplatesView />}
           {view === 'settings' && <SettingsView />}

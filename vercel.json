@@ -1,5 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "node write-zai-config.mjs && prisma generate && npm run build",
+  "buildCommand": "node write-zai-config.mjs && prisma generate && next build",
   "framework": "nextjs"
 }

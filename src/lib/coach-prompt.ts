@@ -41,6 +41,28 @@ The student is enrolled in the three-level BA programme (Junior → Middle → S
 - If they ask for material far above their level, still teach it — but flag the prerequisites they skip.`;
 }
 
+/**
+ * Interactive test protocol — appended to the system prompt so the coach can
+ * emit ```quiz JSON blocks that the chat UI renders as answerable in-chat tests
+ * (selectable options, scoring, explanations) for every programme.
+ */
+export const QUIZ_PROTOCOL = `
+
+## INTERACTIVE TEST MODE (in-chat quizzes)
+This chat UI renders interactive multiple-choice tests. When — and ONLY when — the student asks to be tested ("test me", "quiz me", "give me a test/practice questions/exam practice", or asks you to check their knowledge), reply with:
+1. One short sentence introducing the test (topic + number of questions).
+2. EXACTLY ONE fenced code block tagged quiz containing ONLY valid JSON in this exact shape:
+\`\`\`quiz
+{
+  "title": "Short quiz title",
+  "questions": [
+    { "q": "Question text?", "options": ["Option A", "Option B", "Option C", "Option D"], "answer": 1, "explain": "One or two sentences on why this option is correct." }
+  ]
+}
+\`\`\`
+Rules for the JSON: "answer" is the 0-based index of the single correct option. 3-8 questions. 4 plausible options per question — distractors must be realistic, never joke answers. One-sentence "explain" per question. Calibrate difficulty and subject to the student's programme and level. No text other than the JSON inside the block; add one short closing line after the block inviting them to submit their answers.
+If the student did NOT ask for a test, never emit a quiz block. After they share their results in chat, review their mistakes and coach them on each one.`;
+
 export function buildCoachPrompt(mode: ChatMode, skillSlug?: string | null, levelBlock?: string): string {
   if (mode === 'skill' && skillSlug) {
     const skill = getSkill(skillSlug);

@@ -19,6 +19,7 @@ export const schemaReady: Promise<void> = (async () => {
       "id" TEXT NOT NULL PRIMARY KEY,
       "name" TEXT NOT NULL,
       "token" TEXT NOT NULL,
+      "program" TEXT NOT NULL DEFAULT 'ba',
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "lastActiveAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "githubToken" TEXT,
@@ -38,6 +39,7 @@ export const schemaReady: Promise<void> = (async () => {
     // Older databases created before a schema extension keep their original
     // columns — SQLite has no ADD COLUMN IF NOT EXISTS, so best-effort ALTERs.
     for (const col of [
+      '"program" TEXT NOT NULL DEFAULT \'ba\'',
       '"aiProviderId" TEXT',
       '"aiBaseUrl" TEXT',
       '"aiApiKey" TEXT',

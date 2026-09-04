@@ -14,6 +14,7 @@
 
 import {
   callLLMCustom,
+  guardProviderUrl,
   ProviderHttpError,
   type ChatMsg,
   type StudentAIOverride,
@@ -132,13 +133,27 @@ export function classifyProviderError(e: unknown, baseUrl?: string): ClassifiedE
       };
     }
     if (e.status === 404) {
-      const modelIssue = /model|not[_ -]?found|decommis/i.test(e.body);
+      const isNvidiaFunction = /function.*not found for account/i.test(e.body);
+      const modelIssue = isNvidiaFunction || /model|not[_ -]?found|decommis/i.test(e.body);
       return {
         kind: modelIssue ? 'model_not_found' : 'unknown',
         httpStatus: 404,
-        message: modelIssue
-          ? 'Model not found — this model is not available for this endpoint/account.'
-          : `Endpoint not found (404) — check the base URL for ${host}.`,
+        message: isNvidiaFunction
+          ? 'This model is not accessible for your account (NVIDIA 404: Function not found). Try selecting a different model such as Nemotron Nano, Mistral 7B, or Gemma.'
+          : modelIssue
+            ? 'Model not found — this model is not available for this endpoint/account.'
+            : `Endpoint not found (404) — check the base URL for ${host}.`,
+        detail,
+      };
+    }
+    if (e.status === 402) {
+      const isPollinations = /pollinations/i.test(e.body) || (baseUrl && /pollinations/i.test(baseUrl));
+      return {
+        kind: 'rate_limit',
+        httpStatus: 402,
+        message: isPollinations
+          ? 'Payment required (402) — Pollinations free keyless pool is deprecated and requires credits. Get an API key at https://enter.pollinations.ai, or switch to NVIDIA NIM (1,000 free credits at build.nvidia.com) or Deployment AI.'
+          : 'Payment required (402) — this provider account requires credits or a funded API key.',
         detail,
       };
     }
@@ -262,14 +277,19 @@ async function providerFetch(
   timeoutMs = 20_000,
   init?: RequestInit
 ): Promise<{ status: number; json: unknown; text: string }> {
+  guardProviderUrl(url);
+  // keyless pools (Pollinations with the 'free' placeholder) must NOT carry an
+  // Authorization header — a bogus bearer makes them treat the call as an
+  // authenticated (deprecated) client and reject it with 402.
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (apiKey && apiKey !== 'free') headers.Authorization = `Bearer ${apiKey}`;
   let res: Response;
   try {
     res = await fetch(url, {
       ...init,
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: 'application/json',
-        ...(init?.headers || {}),
+        ...headers,
+        ...(init?.headers as Record<string, string> | undefined),
       },
       signal: AbortSignal.timeout(timeoutMs),
       cache: 'no-store',
@@ -450,6 +470,23 @@ function makeCompatAdapter(opts: CompatOptions): AIProviderAdapter {
         if (found) {
           if (found.lifecycle?.status === 'retired') {
             return { ok: false, availability: 'retired', message: `Model ${modelId} has been retired by the provider.` };
+          }
+          // NVIDIA NIM lists all enterprise models in /models publicly, but chat/completions
+          // returns 404 Function not found if the account lacks permission for that model.
+          if (cfg.providerId === 'nvidia-nim' || /nvidia\.com/i.test(cfg.baseUrl)) {
+            try {
+              await callLLMCustom([{ role: 'user', content: 'Reply with: OK' }], { baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: modelId }, 15_000, { max_tokens: 8 });
+              return { ok: true, availability: 'available', message: `Model ${modelId} is available and responsive.` };
+            } catch (e) {
+              const cls = classifyProviderError(e, cfg.baseUrl);
+              return {
+                ok: false,
+                availability: cls.kind === 'retired' ? 'retired' : cls.kind === 'model_not_found' ? 'unavailable' : 'unknown',
+                message: cls.message,
+                detail: cls.detail,
+                endOfLife: cls.endOfLife,
+              };
+            }
           }
           const ctx = found.contextWindow ? ` (${Math.round(found.contextWindow / 1024)}k context)` : '';
           return {

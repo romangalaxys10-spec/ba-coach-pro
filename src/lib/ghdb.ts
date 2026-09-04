@@ -15,8 +15,20 @@
 
 const API = 'https://api.github.com';
 
-const OWNER = process.env.DEMO_DB_OWNER || '';
-const REPO = process.env.DEMO_DB_REPO || '';
+// The demo DB repo is fixed infrastructure — enforce GitHub naming rules so
+// env values can never reshape the request path (traversal / URL injection).
+const GH_OWNER_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
+const GH_REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/;
+const OWNER = (() => {
+  const v = process.env.DEMO_DB_OWNER || '';
+  if (v && !GH_OWNER_RE.test(v)) throw new Error(`Invalid DEMO_DB_OWNER: ${v.slice(0, 40)}`);
+  return v;
+})();
+const REPO = (() => {
+  const v = process.env.DEMO_DB_REPO || '';
+  if (v && !GH_REPO_RE.test(v)) throw new Error(`Invalid DEMO_DB_REPO: ${v.slice(0, 40)}`);
+  return v;
+})();
 const TOKEN = process.env.DEMO_DB_TOKEN || '';
 
 export const ghDbEnabled = Boolean(OWNER && REPO && TOKEN);
@@ -54,7 +66,7 @@ async function loadFile(name: FileName, force = false): Promise<Partial<FileData
   const job = (async () => {
     const rows: Row[] = [];
     try {
-      const res = await fetch(`${API}/repos/${OWNER}/${REPO}/contents/db/${name}.json`, {
+      const res = await fetch(`${API}/repos/${encodeURIComponent(OWNER)}/${encodeURIComponent(REPO)}/contents/db/${name}.json`, {
         headers: ghHeaders(),
         cache: 'no-store',
       });
@@ -81,7 +93,7 @@ async function loadFile(name: FileName, force = false): Promise<Partial<FileData
 }
 
 async function saveFile(name: FileName, rows: Row[], message: string): Promise<void> {
-  const res = await fetch(`${API}/repos/${OWNER}/${REPO}/contents/db/${name}.json`, {
+  const res = await fetch(`${API}/repos/${encodeURIComponent(OWNER)}/${encodeURIComponent(REPO)}/contents/db/${name}.json`, {
     method: 'PUT',
     headers: ghHeaders(),
     body: JSON.stringify({

@@ -64,3 +64,6 @@ server.log
 
 # dev/test scripts (contain live tokens during verification)
 /scripts/
+
+.mimosa/
+workspace-*.tar

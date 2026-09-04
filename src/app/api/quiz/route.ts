@@ -89,7 +89,7 @@ Rules:
     const raw = await callLLMForStudent(
       student,
       [
-        { role: 'assistant', content: system },
+        { role: 'system', content: system },
         { role: 'user', content: `Generate the quiz now (${n} questions, difficulty: ${difficulty}).` },
       ]
     );

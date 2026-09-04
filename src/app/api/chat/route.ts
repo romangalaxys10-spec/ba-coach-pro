@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { buildCoachPrompt, buildInterviewerScenario, buildLevelCalibration, type ChatMode } from '@/lib/coach-prompt';
+import { buildCoachPrompt, buildInterviewerScenario, buildLevelCalibration, QUIZ_PROTOCOL, type ChatMode } from '@/lib/coach-prompt';
+import { programPersonaFor } from '@/lib/program-curriculum';
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
 import { callLLMForStudent } from '@/lib/provider-runtime';
@@ -67,12 +68,18 @@ export async function POST(req: NextRequest) {
       })
       .catch(() => '');
 
+    // programme persona: English / HRBP students get a subject tutor, BA keeps the coach
+    const personaBlock = programPersonaFor(student.program);
+
     const systemPrompt =
-      mode === 'interviewer'
+      (personaBlock ? personaBlock + '\n\n' : '') +
+      (mode === 'interviewer'
         ? buildCoachPrompt('interviewer', undefined, levelBlock) + '\n\n' + buildInterviewerScenario(body.scenario?.domain, body.scenario?.role, body.scenario?.difficulty)
         : mode === 'feedback'
           ? buildCoachPrompt('feedback', undefined, levelBlock)
-          : buildCoachPrompt(mode, body.skillSlug || conversation.skillSlug, levelBlock);
+          : buildCoachPrompt(mode, body.skillSlug || conversation.skillSlug, levelBlock)) +
+      // interactive in-chat tests: coach may emit ```quiz blocks for any programme
+      (mode === 'feedback' ? '' : QUIZ_PROTOCOL);
 
     const msgCount = await db.message.count({ where: { conversationId: conversation.id } });
     const history = await db.message.findMany({
@@ -84,7 +91,9 @@ export async function POST(req: NextRequest) {
     });
 
     const llmMessages = [
-      { role: 'assistant', content: systemPrompt },
+      // OpenAI-compatible providers require the instructions to come as the
+      // `system` role — `assistant`-first histories break or confuse them.
+      { role: 'system', content: systemPrompt },
       ...history.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content })),
     ];
 

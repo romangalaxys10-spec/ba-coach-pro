@@ -5,22 +5,30 @@ import { publicProviderState } from '@/lib/ai-providers';
 
 export const maxDuration = 60;
 
+/** The education programmes a student can enrol in at portal entry. */
+export const PROGRAMS = ['ba', 'english', 'hrbp'] as const;
+export type ProgramId = (typeof PROGRAMS)[number];
+
+export const isProgram = (v: unknown): v is ProgramId =>
+  typeof v === 'string' && (PROGRAMS as readonly string[]).includes(v);
+
 /** POST /api/auth  { action: 'register' | 'login' } */
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as { action?: string; name?: string; token?: string };
+    const body = (await req.json()) as { action?: string; name?: string; token?: string; program?: string };
 
     if (body.action === 'register') {
       const name = (body.name || '').trim().slice(0, 60);
       if (!name || name.length < 2) {
         return NextResponse.json({ error: 'Please enter your name (at least 2 characters).' }, { status: 400 });
       }
+      const program = isProgram(body.program) ? body.program : 'ba';
       const token = generateStudentToken();
       const student = await db.student.create({
-        data: { name, token },
+        data: { name, token, program },
       });
       return NextResponse.json({
-        student: { id: student.id, name: student.name, token, createdAt: student.createdAt, github: { paired: false, owner: null, repo: null, lastSyncAt: null, autoSync: true }, aiProvider: publicProviderState(student) },
+        student: { id: student.id, name: student.name, program: student.program, token, createdAt: student.createdAt, github: { paired: false, owner: null, repo: null, lastSyncAt: null, autoSync: true }, aiProvider: publicProviderState(student) },
         token,
         isNew: true,
       });
@@ -38,7 +46,7 @@ export async function POST(req: NextRequest) {
       }
       await db.student.update({ where: { id: student.id }, data: { lastActiveAt: new Date() } });
       return NextResponse.json({
-        student: { id: student.id, name: student.name, token, createdAt: student.createdAt, github: { paired: Boolean(student.githubToken && student.githubRepo), owner: student.githubOwner, repo: student.githubRepo, lastSyncAt: student.githubSyncedAt, autoSync: student.autoSync }, aiProvider: publicProviderState(student) },
+        student: { id: student.id, name: student.name, program: student.program, token, createdAt: student.createdAt, github: { paired: Boolean(student.githubToken && student.githubRepo), owner: student.githubOwner, repo: student.githubRepo, lastSyncAt: student.githubSyncedAt, autoSync: student.autoSync }, aiProvider: publicProviderState(student) },
         token,
         isNew: false,
       });
@@ -67,6 +75,7 @@ export async function GET(req: NextRequest) {
     student: {
       id: student.id,
       name: student.name,
+      program: student.program,
       token: student.token,
       createdAt: student.createdAt,
       lastActiveAt: student.lastActiveAt,

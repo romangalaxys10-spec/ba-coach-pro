@@ -6,6 +6,9 @@ import type { ProviderDiscovery, SavedModelState } from '@/lib/ai-providers';
 export type View = 'chat' | 'skills' | 'learn' | 'practice' | 'templates' | 'settings';
 export type ChatMode = 'coach' | 'skill' | 'interviewer';
 
+/** English / HRBP students land on their programme course; BA students on the coach chat. */
+const landingView = (program?: string): View => (program === 'english' || program === 'hrbp' ? 'learn' : 'chat');
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -38,6 +41,7 @@ export interface AiProviderInfo {
 export interface StudentInfo {
   id: string;
   name: string;
+  program?: string; // 'ba' | 'english' | 'hrbp' — chosen at enrolment
   token?: string;
   createdAt: string;
   github: {
@@ -86,7 +90,7 @@ interface AppState {
 
   // auth actions
   bootstrap: () => Promise<void>;
-  register: (name: string) => Promise<{ ok: boolean; error?: string }>;
+  register: (name: string, program?: string) => Promise<{ ok: boolean; error?: string }>;
   login: (token: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
   dismissIntroCard: () => void;
@@ -175,7 +179,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const res = await apiFetch('/api/auth');
       if (res.ok) {
         const data = await readJson<{ student?: StudentInfo; stats?: StudentStats }>(res);
-        set({ student: data.student, stats: data.stats, authReady: true });
+        set({ student: data.student, stats: data.stats, authReady: true, view: landingView(data.student?.program) });
         void get().loadConversations();
         void get().loadProgress();
       } else {
@@ -187,18 +191,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  register: async name => {
+  register: async (name, program) => {
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'register', name }),
+        body: JSON.stringify({ action: 'register', name, program }),
       });
       const data = await readJson<{ error?: string; token?: string; student?: StudentInfo }>(res);
       if (!res.ok) return { ok: false, error: data.error || 'Registration failed' };
       if (!data.token) return { ok: false, error: 'Registration failed' };
       setStoredToken(data.token);
-      set({ student: data.student, justRegistered: true, freshToken: data.token, stats: { conversations: 0, lessonsCompleted: 0, quizAttempts: 0, flashcards: 0 } });
+      set({ student: data.student, justRegistered: true, freshToken: data.token, stats: { conversations: 0, lessonsCompleted: 0, quizAttempts: 0, flashcards: 0 }, view: landingView(data.student?.program) });
       void get().loadConversations();
       void get().loadProgress();
       return { ok: true };
@@ -218,7 +222,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!res.ok) return { ok: false, error: data.error || 'Login failed' };
       if (!data.token) return { ok: false, error: 'Login failed' };
       setStoredToken(data.token);
-      set({ student: data.student, justRegistered: false, freshToken: '' });
+      set({ student: data.student, justRegistered: false, freshToken: '', view: landingView(data.student?.program) });
       // fetch profile with stats
       void get().refreshStudent().then(() => {
         void get().loadConversations();

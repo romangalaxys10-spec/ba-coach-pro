@@ -1,8 +1,11 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useAppStore, type View } from '@/lib/store';
 import { getSkill } from '@/data/skills-data';
 import { computeCareerProgress, levelById } from '@/lib/levels';
+import { programById } from '@/lib/programs';
+import { getProgramCurriculum } from '@/lib/program-curriculum';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -25,7 +28,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const NAV: { view: View; label: string; icon: typeof Library; hint?: string }[] = [
+const BA_NAV: { view: View; label: string; icon: typeof Library; hint?: string }[] = [
   { view: 'chat', label: 'Coach Chat', icon: MessageSquare },
   { view: 'skills', label: 'Skill Library', icon: Library, hint: '53' },
   { view: 'learn', label: 'Learning Tracks', icon: Route },
@@ -34,12 +37,37 @@ const NAV: { view: View; label: string; icon: typeof Library; hint?: string }[] 
   { view: 'settings', label: 'Profile & GitHub', icon: Settings },
 ];
 
+const PROGRAM_NAV: { view: View; label: string; icon: typeof Library; hint?: string }[] = [
+  { view: 'chat', label: 'Tutor Chat', icon: MessageSquare },
+  { view: 'learn', label: 'My Course', icon: Route },
+  { view: 'settings', label: 'Profile & GitHub', icon: Settings },
+];
+
 export function AppSidebar() {
   const store = useAppStore();
+  const program = programById(store.student?.program);
+  const isBA = program.id === 'ba';
+  const nav = isBA ? BA_NAV : PROGRAM_NAV;
   const career = computeCareerProgress(store.progressMap);
   const currentLevel = levelById(career.currentLevelId);
   const currentPct = career.levels.find(l => l.id === career.currentLevelId)?.pct ?? 0;
   const levelComplete = career.levels.find(l => l.id === career.currentLevelId)?.status === 'complete';
+
+  // programme (non-BA) progress straight off the shared progress store
+  const prog = useMemo(() => {
+    if (isBA) return null;
+    let total = 0;
+    let done = 0;
+    (getProgramCurriculum(program.id) || []).forEach(lv =>
+      lv.units.forEach(u =>
+        u.lessons.forEach(l => {
+          total += 1;
+          if (store.progressMap[l.id]) done += 1;
+        })
+      )
+    );
+    return { done, total, pct: total ? (done / total) * 100 : 0 };
+  }, [isBA, program.id, store.progressMap]);
 
   return (
     <aside
@@ -51,11 +79,11 @@ export function AppSidebar() {
       {/* brand */}
       <div className="flex items-center gap-2.5 px-4 pb-3 pt-4">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-          <GraduationCap className="h-5 w-5" />
+          {isBA ? <GraduationCap className="h-5 w-5" /> : <span className="text-lg leading-none">{program.emoji}</span>}
         </div>
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold tracking-tight">BA Coach Pro</div>
-          <div className="truncate text-[11px] text-muted-foreground">Learn · Practise · Deliver</div>
+          <div className="truncate text-sm font-semibold tracking-tight">{isBA ? 'BA Coach Pro' : program.name}</div>
+          <div className="truncate text-[11px] text-muted-foreground">{isBA ? 'Learn · Practise · Deliver' : program.tagline}</div>
         </div>
         <Button variant="ghost" size="icon" className="ml-auto md:hidden" onClick={store.toggleSidebar} aria-label="Close menu">
           <X className="h-4 w-4" />
@@ -75,7 +103,7 @@ export function AppSidebar() {
 
       {/* nav */}
       <nav className="mt-4 px-3">
-        {NAV.map(item => (
+        {nav.map(item => (
           <button
             key={item.view}
             onClick={() => store.setView(item.view)}
@@ -97,35 +125,66 @@ export function AppSidebar() {
         ))}
       </nav>
 
-      {/* career level card */}
-      <button
-        onClick={() => store.setView('learn')}
-        className="mx-3 mt-4 rounded-xl border border-sidebar-border bg-card/60 p-3 text-left transition hover:border-primary/40"
-        title="Open Learning Tracks"
-      >
-        <div className="flex items-center gap-2">
-          <currentLevel.icon className={cn('h-4 w-4 shrink-0', currentLevel.color)} />
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Career level
-          </span>
-          <span className={cn('ml-auto text-[11px] font-bold', currentLevel.color)}>
-            {currentLevel.short} · {currentPct}%
-          </span>
-        </div>
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className={cn('h-full rounded-full transition-all', currentLevel.bar)}
-            style={{ width: `${currentPct}%` }}
-          />
-        </div>
-        <div className="mt-1.5 text-[10px] text-muted-foreground">
-          {levelComplete
-            ? 'Level mastered — next level unlocked'
-            : career.overallDone === 0
-              ? 'Start the Junior track to begin'
-              : `${career.overallDone}/${career.overallTotal} programme lessons done`}
-        </div>
-      </button>
+      {/* progress card — BA career levels, or the programme's own progress */}
+      {isBA ? (
+        <button
+          onClick={() => store.setView('learn')}
+          className="mx-3 mt-4 rounded-xl border border-sidebar-border bg-card/60 p-3 text-left transition hover:border-primary/40"
+          title="Open Learning Tracks"
+        >
+          <div className="flex items-center gap-2">
+            <currentLevel.icon className={cn('h-4 w-4 shrink-0', currentLevel.color)} />
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Career level
+            </span>
+            <span className={cn('ml-auto text-[11px] font-bold', currentLevel.color)}>
+              {currentLevel.short} · {currentPct}%
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className={cn('h-full rounded-full transition-all', currentLevel.bar)}
+              style={{ width: `${currentPct}%` }}
+            />
+          </div>
+          <div className="mt-1.5 text-[10px] text-muted-foreground">
+            {levelComplete
+              ? 'Level mastered — next level unlocked'
+              : career.overallDone === 0
+                ? 'Start the Junior track to begin'
+                : `${career.overallDone}/${career.overallTotal} programme lessons done`}
+          </div>
+        </button>
+      ) : (
+        prog && (
+          <button
+            onClick={() => store.setView('learn')}
+            className="mx-3 mt-4 rounded-xl border border-sidebar-border bg-card/60 p-3 text-left transition hover:border-primary/40"
+            title={`Open ${program.name} course`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm leading-none">{program.emoji}</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Course progress
+              </span>
+              <span className="ml-auto text-[11px] font-bold text-primary">
+                {prog.total ? Math.round(prog.pct) : 0}%
+              </span>
+            </div>
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${prog.pct}%` }}
+              />
+            </div>
+            <div className="mt-1.5 text-[10px] text-muted-foreground">
+              {prog.done === 0
+                ? 'Open My Course and pick your first lesson'
+                : `${prog.done}/${prog.total} lessons done — keep going!`}
+            </div>
+          </button>
+        )
+      )}
 
       <div className="mx-4 mt-4 border-t border-sidebar-border" />
       <div className="px-4 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -208,9 +267,11 @@ export function AppSidebar() {
           {store.theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           {store.theme === 'dark' ? 'Light mode' : 'Dark mode'}
         </button>
-        <p className="px-2.5 pt-2 text-[10px] leading-snug text-muted-foreground">
-          Built on the open-source business-analysis-skills pack (MIT) — 53 coaching skills.
-        </p>
+        {isBA && (
+          <p className="px-2.5 pt-2 text-[10px] leading-snug text-muted-foreground">
+            Built on the open-source business-analysis-skills pack (MIT) — 53 coaching skills.
+          </p>
+        )}
       </div>
     </aside>
   );
