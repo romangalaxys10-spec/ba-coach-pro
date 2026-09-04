@@ -161,7 +161,15 @@ export function classifyProviderError(e: unknown, baseUrl?: string): ClassifiedE
       return { kind: 'rate_limit', httpStatus: 429, message: 'Rate limited — the key works but hit a quota or concurrency limit. Try again shortly.', detail };
     }
     if (e.status >= 500) {
-      return { kind: 'server', httpStatus: e.status, message: `Provider server error (${e.status}) — the provider failed to answer. Try again or pick another model.`, detail };
+      const busy = /busy|temporarily|retry/i.test(e.body);
+      return {
+        kind: 'server',
+        httpStatus: e.status,
+        message: busy
+          ? `Model temporarily busy at the provider (${e.status}) — the app retries automatically; if it keeps happening, free-tier models are the busiest, so pick a non-free model from the list.`
+          : `Provider server error (${e.status}) — the provider failed to answer. Try again or pick another model.`,
+        detail,
+      };
     }
     return { kind: 'unknown', httpStatus: e.status, message: `The provider rejected the request (${e.status}).`, detail };
   }

@@ -509,8 +509,24 @@ export async function* streamLLM(
   override?: StudentAIOverride | null
 ): AsyncGenerator<string> {
   if (override) {
-    yield* streamViaOpenAI(messages, override.baseUrl, override.apiKey, override.model);
-    return;
+    // free-tier aggregator models (e.g. OpenAdapter's *-free ids) answer 502/503
+    // "temporarily busy — retry in a few seconds" under load; retry with backoff
+    // as long as nothing has been streamed yet
+    for (let attempt = 0; ; attempt++) {
+      let yielded = false;
+      try {
+        for await (const chunk of streamViaOpenAI(messages, override.baseUrl, override.apiKey, override.model)) {
+          yielded = true;
+          yield chunk;
+        }
+        return;
+      } catch (e) {
+        const retryable =
+          !yielded && e instanceof ProviderHttpError && [502, 503, 504].includes(e.status) && attempt < 2;
+        if (!retryable) throw e;
+        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+      }
+    }
   }
   if (ENV_KEY_EFF) {
     let yielded = false;
