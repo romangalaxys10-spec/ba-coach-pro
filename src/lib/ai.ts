@@ -522,9 +522,9 @@ export async function* streamLLM(
         return;
       } catch (e) {
         const retryable =
-          !yielded && e instanceof ProviderHttpError && [502, 503, 504].includes(e.status) && attempt < 2;
+          !yielded && e instanceof ProviderHttpError && [502, 503, 504].includes(e.status) && attempt < 3;
         if (!retryable) throw e;
-        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 2500 * (attempt + 1)));
       }
     }
   }

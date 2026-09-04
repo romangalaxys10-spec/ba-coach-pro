@@ -6,6 +6,7 @@ import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
 import { streamLLM } from '@/lib/ai';
 import { studentAIOverride } from '@/lib/ai-providers';
+import { classifyProviderError } from '@/lib/provider-adapters';
 
 export const maxDuration = 300;
 
@@ -137,9 +138,15 @@ export async function POST(req: NextRequest) {
           controller.enqueue(sse({ type: 'done', conversationId, title }));
         } catch (error) {
           console.error('[/api/chat stream] error:', error);
-          controller.enqueue(
-            sse({ type: 'error', message: error instanceof Error ? error.message : 'Failed to get coach response' })
-          );
+          // provider failures surface as friendly guidance, never raw JSON
+          const overrideCfg = studentAIOverride(student);
+          const cls = classifyProviderError(error, overrideCfg?.baseUrl);
+          const friendly =
+            cls.message ||
+            (error instanceof Error && error.message && !/responded \d+/.test(error.message)
+              ? error.message
+              : 'The coach could not answer right now — try again in a moment.');
+          controller.enqueue(sse({ type: 'error', message: friendly }));
         } finally {
           controller.close();
         }
