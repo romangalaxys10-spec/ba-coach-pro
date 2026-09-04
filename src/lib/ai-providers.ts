@@ -273,6 +273,19 @@ export function privateHostCheck(rawHost: string): boolean {
 }
 
 /**
+ * Providers that moved hosts: rewrite saved configs from the dead host to the
+ * live one so records saved before the migration keep working (and stop
+ * displaying a wrong endpoint in Settings) without requiring a re-save.
+ */
+export function migrateProviderBaseUrl(baseUrl: string): string {
+  // OpenAdapter's API lives at api.openadapter.in — the .dev host is dead
+  if (/^https:\/\/api\.openadapter\.dev(\/|$)/i.test(baseUrl)) {
+    return baseUrl.replace('api.openadapter.dev', 'api.openadapter.in');
+  }
+  return baseUrl;
+}
+
+/**
  * Build the per-request override from a student record (Prisma Student or the
  * AuthedStudent projection — both carry the ai* fields). Returns null when the
  * student has no usable provider configured.
@@ -283,7 +296,7 @@ export function studentAIOverride(student: {
   aiModel?: string | null;
 } | null | undefined): { baseUrl: string; apiKey: string; model: string } | null {
   if (!student) return null;
-  const baseUrl = sanitizeBaseUrl(student.aiBaseUrl || '');
+  const baseUrl = migrateProviderBaseUrl(sanitizeBaseUrl(student.aiBaseUrl || ''));
   const apiKey = (student.aiApiKey || '').trim();
   const model = (student.aiModel || '').trim();
   if (!baseUrl || !apiKey || !model) return null;
@@ -305,7 +318,7 @@ export function publicProviderState(student?: {
   return {
     configured,
     providerId: configured ? student.aiProviderId || null : null,
-    baseUrl: configured ? student.aiBaseUrl : null,
+    baseUrl: configured ? migrateProviderBaseUrl(student.aiBaseUrl) : null,
     model: configured ? student.aiModel : null,
     keyMasked: configured ? maskKey(student.aiApiKey) : null,
     verifiedAt: student.aiVerifiedAt ?? null,
