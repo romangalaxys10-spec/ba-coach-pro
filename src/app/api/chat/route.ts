@@ -4,7 +4,8 @@ import { buildCoachPrompt, buildInterviewerScenario, buildLevelCalibration, QUIZ
 import { programPersonaFor } from '@/lib/program-curriculum';
 import { getAuthedStudent, unauthorized } from '@/lib/auth';
 import { triggerSync } from '@/lib/github-sync';
-import { callLLMForStudent } from '@/lib/provider-runtime';
+import { streamLLM } from '@/lib/ai';
+import { studentAIOverride } from '@/lib/ai-providers';
 
 export const maxDuration = 300;
 
@@ -97,12 +98,6 @@ export async function POST(req: NextRequest) {
       ...history.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content })),
     ];
 
-    const reply = await callLLMForStudent(student, llmMessages);
-
-    await db.message.create({
-      data: { conversationId: conversation.id, role: 'assistant', content: reply },
-    });
-
     // ---- title: derive from first user message ----
     let title = conversation.title;
     if (title === 'New conversation') {
@@ -112,18 +107,52 @@ export async function POST(req: NextRequest) {
       else if (mode === 'skill' && body.skillSlug) title = '🧩 ' + title;
     }
 
-    await db.conversation.update({
-      where: { id: conversation.id },
-      data: { title, mode, skillSlug: body.skillSlug || conversation.skillSlug, updatedAt: new Date() },
+    // ---- streaming SSE response: meta → text chunks → done ----
+    // The assistant message is persisted (and GitHub-synced) once the stream
+    // completes, so the durable state matches the non-streaming behaviour.
+    const encoder = new TextEncoder();
+    const sse = (obj: unknown) => encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
+
+    const conversationId = conversation.id;
+    const studentId = student.id;
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        let reply = '';
+        try {
+          controller.enqueue(sse({ type: 'meta', conversationId, title }));
+          for await (const chunk of streamLLM(llmMessages, studentAIOverride(student))) {
+            reply += chunk;
+            controller.enqueue(sse({ type: 'chunk', text: chunk }));
+          }
+          if (!reply.trim()) throw new Error('Empty response from the coach');
+
+          await db.message.create({
+            data: { conversationId, role: 'assistant', content: reply },
+          });
+          await db.conversation.update({
+            where: { id: conversationId },
+            data: { title, mode, skillSlug: body.skillSlug || conversation.skillSlug, updatedAt: new Date() },
+          });
+          triggerSync(studentId, `chat: ${title}`);
+          controller.enqueue(sse({ type: 'done', conversationId, title }));
+        } catch (error) {
+          console.error('[/api/chat stream] error:', error);
+          controller.enqueue(
+            sse({ type: 'error', message: error instanceof Error ? error.message : 'Failed to get coach response' })
+          );
+        } finally {
+          controller.close();
+        }
+      },
     });
 
-    // ---- real-time backup to the student's paired GitHub repo ----
-    triggerSync(student.id, `chat: ${title}`);
-
-    return NextResponse.json({
-      conversationId: conversation.id,
-      title,
-      reply,
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      },
     });
   } catch (error) {
     console.error('[/api/chat] error:', error);

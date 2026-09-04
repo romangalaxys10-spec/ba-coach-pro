@@ -445,7 +445,9 @@ export function ChatView() {
                 </div>
               </div>
             ))}
-            {store.thinking && (
+            {/* typing dots only until the first streamed chunk arrives — then the
+                live-growing assistant bubble replaces them */}
+            {store.thinking && !(store.messages.length > 0 && store.messages[store.messages.length - 1].role === 'assistant') && (
               <div className="fade-up mb-6 flex gap-3">
                 <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
                   <GraduationCap className="h-4 w-4" />

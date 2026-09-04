@@ -476,6 +476,64 @@ export const useAppStore = create<AppState>((set, get) => ({
           scenario,
         }),
       });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('text/event-stream') && res.body) {
+        // ---- streaming path: grow the assistant message as chunks arrive ----
+        const replyId = uuid();
+        let full = '';
+        set(s => ({ messages: [...s.messages, { id: replyId, role: 'assistant', content: '' }], thinking: true }));
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let streamError: string | null = null;
+        let conversationId = state.activeConversationId;
+
+        const handleEvent = (payload: string) => {
+          let evt: { type?: string; text?: string; message?: string; conversationId?: string };
+          try {
+            evt = JSON.parse(payload);
+          } catch {
+            return;
+          }
+          if (evt.type === 'meta' && evt.conversationId) conversationId = evt.conversationId;
+          else if (evt.type === 'chunk' && evt.text) full += evt.text;
+          else if (evt.type === 'error') streamError = evt.message || 'Coach request failed';
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop() ?? '';
+          for (const frame of frames) {
+            const line = frame.split('\n').find(l => l.startsWith('data:'));
+            if (line) handleEvent(line.slice(5).trim());
+          }
+          // live-update the bubble with whatever has arrived so far
+          set(s => ({
+            messages: s.messages.map(m => (m.id === replyId ? { ...m, content: full } : m)),
+            activeConversationId: conversationId || s.activeConversationId,
+          }));
+        }
+        if (buffer) {
+          const line = buffer.split('\n').find(l => l.startsWith('data:'));
+          if (line) handleEvent(line.slice(5).trim());
+        }
+        set(s => ({ messages: s.messages.map(m => (m.id === replyId ? { ...m, content: full } : m)) }));
+
+        if (streamError || !full.trim()) {
+          throw new Error(streamError || 'Coach request failed');
+        }
+        set(s => ({ thinking: false, activeConversationId: conversationId || s.activeConversationId }));
+        void get().loadConversations();
+        void get().refreshStudent();
+        return full;
+      }
+
+      // ---- non-streaming fallback (proxy errors, legacy responses) ----
       const data = await readJson<{ error?: string; reply?: string; conversationId?: string }>(res);
       if (!res.ok || data.error) throw new Error(data.error || 'Coach request failed');
 
@@ -496,7 +554,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         role: 'assistant',
         content: `⚠️ ${e instanceof Error ? e.message : 'Something went wrong. Please try again.'}`,
       };
-      set(s => ({ messages: [...s.messages, errMsg], thinking: false }));
+      set(s => ({
+        // drop a partially-streamed (possibly empty) bubble so only the error shows
+        messages: [...s.messages.filter(m => !(m.role === 'assistant' && !m.content.trim())), errMsg],
+        thinking: false,
+      }));
       return null;
     }
   },

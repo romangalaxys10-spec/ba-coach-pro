@@ -404,6 +404,143 @@ async function callViaEnvKey(messages: ChatMsg[]): Promise<string> {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Streaming transport (OpenAI-compatible SSE)                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Stream one chat completion from an OpenAI-compatible endpoint, yielding
+ * text deltas as they arrive. Shared by the student-provider and deployment
+ * chains; the caller decides fallbacks when the endpoint can't stream.
+ */
+export async function* streamViaOpenAI(
+  messages: ChatMsg[],
+  base: string,
+  apiKey: string,
+  model: string,
+  timeoutMs = 120_000
+): AsyncGenerator<string> {
+  // same pollinations credential routing as callViaOpenAI
+  let cleanBase = base;
+  const hasRealKey = Boolean(apiKey && apiKey !== 'free');
+  const isGenHost = /gen\.pollinations\.ai/i.test(cleanBase);
+  const isLegacyHost = /text\.pollinations\.ai/i.test(cleanBase);
+  if (isLegacyHost && hasRealKey) cleanBase = 'https://gen.pollinations.ai/v1';
+  else if (isGenHost && !hasRealKey) cleanBase = 'https://text.pollinations.ai/openai';
+
+  const body: Record<string, unknown> = { model, messages, stream: true };
+  if (isZaiHost(cleanBase)) body.thinking = { type: 'disabled' };
+  if (isPollinationsHost(cleanBase)) body.referrer = 'ba-coach-pro';
+
+  const url = /\/(chat\/completions|openai)$/.test(cleanBase) ? cleanBase : `${cleanBase}/chat/completions`;
+  guardProviderUrl(url);
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (hasRealKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    redirect: 'error',
+    headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    const text = (await res.text().catch(() => '')).slice(0, 500);
+    throw new ProviderHttpError(res.status, text);
+  }
+  if (!res.body) throw new Error('Streaming not supported by this endpoint');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let produced = false;
+  const consumeLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) return;
+    const payload = trimmed.slice(5).trim();
+    if (!payload || payload === '[DONE]') return;
+    try {
+      const j = JSON.parse(payload) as {
+        choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>;
+      };
+      const delta = j.choices?.[0]?.delta?.content ?? j.choices?.[0]?.message?.content ?? '';
+      if (delta) {
+        produced = true;
+        returnTo.push(delta);
+      }
+    } catch {
+      // keep-alive / partial frame — skip
+    }
+  };
+  const returnTo: string[] = [];
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) consumeLine(line);
+      for (const chunk of returnTo.splice(0)) yield chunk;
+    }
+    // flush the decoder tail and any event not terminated by a newline
+    buffer += decoder.decode();
+    if (buffer) {
+      for (const line of buffer.split('\n')) consumeLine(line);
+      for (const chunk of returnTo.splice(0)) yield chunk;
+    }
+  } finally {
+    // cancel first (releaseLock would make cancel throw)
+    reader.cancel().catch(() => null);
+    reader.releaseLock();
+  }
+  if (!produced) throw new Error('Empty stream from AI model');
+}
+
+/**
+ * Streaming LLM entry point for the chat route.
+ * Streams from the student's provider / env key / free pool (all
+ * OpenAI-compatible). Falls back to the non-streaming chain (tunnel / SDK)
+ * by emitting the full reply as a single chunk.
+ */
+export async function* streamLLM(
+  messages: ChatMsg[],
+  override?: StudentAIOverride | null
+): AsyncGenerator<string> {
+  if (override) {
+    yield* streamViaOpenAI(messages, override.baseUrl, override.apiKey, override.model);
+    return;
+  }
+  if (ENV_KEY_EFF) {
+    let yielded = false;
+    try {
+      for await (const chunk of streamViaOpenAI(messages, ENV_BASE_EFF, ENV_KEY_EFF, ENV_MODEL_EFF)) {
+        yielded = true;
+        yield chunk;
+      }
+      return;
+    } catch (e) {
+      // once the caller has seen output we must not restart with another
+      // source — the reply would be duplicated
+      if (yielded || (e instanceof ProviderHttpError && (e.status === 401 || e.status === 403 || e.status === 404))) throw e;
+      console.error('[ai] env-key stream failed — falling back:', e);
+    }
+  }
+  let freeYielded = false;
+  try {
+    for await (const chunk of streamViaOpenAI(messages, POLLINATIONS_DEFAULT_URL, 'free', POLLINATIONS_MODEL)) {
+      freeYielded = true;
+      yield chunk;
+    }
+    return;
+  } catch (e) {
+    if (freeYielded) throw e;
+    console.error('[ai] free-pool stream failed — falling back:', e);
+  }
+  yield await callLLMDirect(messages, 1);
+}
+
 /** Direct resolution (env key → SDK → free pool). Used by the tunnel endpoint itself. */
 export async function callLLMDirect(messages: ChatMsg[], retries = 2): Promise<string> {
   if (ENV_KEY_EFF) {

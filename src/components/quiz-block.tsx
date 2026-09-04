@@ -76,7 +76,16 @@ export function parseQuizContent(content: string): QuizSegment[] {
     else segments.push({ kind: 'md', text: content.slice(idx, idx + m[0].length) });
     last = idx + m[0].length;
   }
-  if (last < content.length) segments.push({ kind: 'md', text: content.slice(last) });
+  let tail = content.slice(last);
+  // while STREAMING, an opening ```quiz fence may not be closed yet — never
+  // flash raw JSON; show a placeholder until the block completes
+  const openIdx = tail.indexOf('```quiz');
+  if (openIdx !== -1) {
+    if (openIdx > 0) segments.push({ kind: 'md', text: tail.slice(0, openIdx) });
+    segments.push({ kind: 'md', text: '_⏳ Preparing your interactive test…_' });
+  } else if (tail) {
+    segments.push({ kind: 'md', text: tail });
+  }
   return segments;
 }
 
