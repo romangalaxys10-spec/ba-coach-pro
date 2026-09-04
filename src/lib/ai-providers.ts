@@ -9,7 +9,7 @@
  *  - Z.ai Coding Plan : https://api.z.ai/api/coding/paas/v4   (OpenAI protocol, GLM Coding Plan subscription)
  *  - NVIDIA NIM       : https://integrate.api.nvidia.com/v1   (free tier keys at build.nvidia.com, `nvapi-…`)
  *  - OpenCode Zen     : https://opencode.ai/zen/v1            (OpenAI-compatible; free models like code-supernova / grok-code)
- *  - OpenAdapter      : https://api.openadapter.dev/v1        (aggregator — 79+ models across 15+ providers)
+ *  - OpenAdapter      : https://api.openadapter.in/v1        (aggregator — live model list requires a key)
  */
 
 export interface ProviderPreset {
@@ -98,24 +98,16 @@ export const AI_PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'openadapter',
     name: 'OpenAdapter',
     emoji: '🟠',
-    tagline: 'openadapter.dev — one key, SOTA models across 15+ providers',
+    tagline: 'openadapter.in — one key, models across many providers',
     signupUrl: 'https://openadapter.dev',
-    baseUrl: 'https://api.openadapter.dev/v1',
-    models: [
-      'Qwen3.8-Flash',
-      'DeepSeek-V4-Flash',
-      'GLM-5.1',
-      'GPT-5.6-Luna',
-      'Kimi-K2.6',
-      'gemma-4-31b-it',
-      'MiniMax-M3',
-    ],
-    defaultModel: 'Qwen3.8-Flash',
+    baseUrl: 'https://api.openadapter.in/v1',
+    models: [],
+    defaultModel: '',
     keyHint: 'Paste your OpenAdapter API key',
     needsKey: true,
     freeTier: true,
     fastModels: true,
-    note: 'One key, every upstream provider. Their /models endpoint requires a key — until you paste one, the list below shows BUILT-IN suggestions (current as of Sep 2026), not a live fetch. With a key, "Measure real speed" benchmarks what your account can actually call, fastest-first. Model ids are case-sensitive (e.g. Qwen3.8-Flash).',
+    note: 'One key, every upstream provider. OpenAdapter does not publish a public model list — paste your key and press "Measure real speed": the LIVE model list for your account is fetched from api.openadapter.in and ranked by measured tokens/sec. Pick a model from that list (ids are case-sensitive).',
   },
   {
     id: 'custom',

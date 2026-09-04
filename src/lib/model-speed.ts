@@ -369,7 +369,9 @@ async function fetchProviderModels(
         ids: [],
         error:
           res.status === 401 || res.status === 403
-            ? 'The provider rejected the API key while listing models.'
+            ? apiKey
+              ? 'The provider rejected the API key while listing models.'
+              : 'This provider requires an API key to list models — paste your key above, then press "Measure real speed".'
             : `Model list request failed (HTTP ${res.status}).`,
       };
     }
